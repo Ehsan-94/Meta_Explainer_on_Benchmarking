@@ -44,7 +44,7 @@ Datasets_Name = ["MUTAG", "NCI1", "ENZYMES", "Graph-SST5", "PROTEINS", "IsCyclic
 GNN_Models = ["GCN", "DGCNN", "DIFFPOOL", "GIN"]
 GNN_Evaluations = ["AUCROC", "AUCPR", "ACC", "PREDICTION_TIME"]
 Explainers = ["GNNExplainer", "SubgraphX", "PGMExplainer", "CF2", "PGExplainer", "GraphMask", "XGNN", "GNNInterpreter"]
-Explainer_Evaluation = ["Fidelity+", "Fidelity-", "Contrastivity", "Sparsity", "Stability", "Explanation_Time"]
+Explainer_Evaluation = ["Fidelity+", "Fidelity-", "Contrastivity", "Sparsity", "Stability", "Explanation_RunTime"]
 
 
 GNNs_Stats = \
@@ -1386,7 +1386,7 @@ Stability = {
 # Example access:
 # print(data['MUTAG']['GCN']['GNNExplainer'])  # Output: 0.063
 
-Explanation_Time = {
+Explanation_RunTime = {
     "MUTAG": {
         "GCN": {
             "GNNExplainer": 0.015,
@@ -1682,7 +1682,7 @@ Fidelity_minus_score, Fidelity_minus_sorted = sort_explainers(Fidelity_minus, de
 Contrastivity_score, Contrastivity_sorted = sort_explainers(Contrastivity, descending=True)
 Sparsity_score, Sparsity_sorted = sort_explainers(Sparsity, descending=True)
 Stability_score, Stability_sorted = sort_explainers(Stability, descending=True)
-Explanation_Time_score, Explanation_Time_sorted = sort_explainers(Explanation_Time, descending=False)
+Explanation_RunTime_score, Explanation_RunTime_sorted = sort_explainers(Explanation_RunTime, descending=False)
 
 # example_dict_score, example_dict_sorted = sort_explainers(example_dict, descending=True)
 # for dataset_name, gnn_model in example_dict_score.items():
@@ -1693,7 +1693,7 @@ Explanation_Time_score, Explanation_Time_sorted = sort_explainers(Explanation_Ti
 weight_levels = [1, 2, 3, 4]
 all_cases = list(itertools.product(weight_levels, repeat=6))
 stats_dict = {"Fidelity+": Fidelity_plus_score, "Fidelity-": Fidelity_minus_score, "Contrastivity": Contrastivity_score,
-              "Sparsity": Sparsity_score, "Stability": Stability_score, "ExplanationTime": Explanation_Time_score}
+              "Sparsity": Sparsity_score, "Stability": Stability_score, "ExplanationTime": Explanation_RunTime_score}
 Label_Dict = {}
 for dataset_name in Datasets_Name:
     Label_Dict[dataset_name] = {}
