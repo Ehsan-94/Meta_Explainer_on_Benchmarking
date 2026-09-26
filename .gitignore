@@ -4,3 +4,10 @@
 Train_and_Evaluate_Meta_Explainer/Experimental Results/
 
 Dataset_Creation_for_Meta_Explainer/Experimental Results/
+# Python generated files
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor backup files
+*~
