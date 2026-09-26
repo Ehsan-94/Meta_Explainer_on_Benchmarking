@@ -13,14 +13,14 @@ from torch_geometric.nn import GCNConv
 import sys 
 from torch_geometric.datasets import TUDataset
 from scipy.sparse import csr_matrix
-py_path = '/data/cs.aau.dk/ey33jw/Explainability_Methods/Models/Script/Layers/'
+py_path = '/data/cs.aau.dk/ey33jw/Meta_Explainer_on_Benchmarking/Models/Script/Layers/'
 sys.path.insert(0,py_path)
-import GlobalAveragePooling as global_avg_pooling
-import IdenticalPooling as identical_pooling
-import DGCNN_Layer as dgcnn_layer
-import DGCNN_GNN_Layers as dgcnn_gnn_layers
-import DGCNN_SortPooling_Layer as sortpooling_layer
-import DGCNN_MLP as dgcnn_mlp
+from Meta_Explainer_on_Benchmarking.Models.Script.Layers import GlobalAveragePooling as global_avg_pooling
+from Meta_Explainer_on_Benchmarking.Models.Script.Layers import IdenticalPooling as identical_pooling
+from Meta_Explainer_on_Benchmarking.Models.Script.Layers import DGCNN_Layer as dgcnn_layer
+from Meta_Explainer_on_Benchmarking.Models.Script.Layers import DGCNN_GNN_Layers as dgcnn_gnn_layers
+from Meta_Explainer_on_Benchmarking.Models.Script.Layers import DGCNN_SortPooling_Layer as sortpooling_layer
+from Meta_Explainer_on_Benchmarking.Models.Script.Layers import DGCNN_MLP as dgcnn_mlp
 
 
 class DGCNN_Model(nn.Module):
@@ -58,13 +58,13 @@ class DGCNN_Model(nn.Module):
                                                 Bias=self.Bias, strides=self.strides)
         if dgcnn_act_fun == 'ReLu':
             self.dgcnn_act_fun = F.relu
-            print('ReLu is Selected.')
+            # print('ReLu is Selected.')
         elif dgcnn_act_fun == 'eLu':
             self.dgcnn_act_fun = nn.functional.elu
-            print('eLu is Selected.')
+            # print('eLu is Selected.')
         elif dgcnn_act_fun == 'tanh':
             self.dgcnn_act_fun = torch.tanh
-            print('tanh is Selected.')
+            # print('tanh is Selected.')
 
 
 
@@ -172,11 +172,13 @@ class DGCNN_Model(nn.Module):
 
         Output_of_GNN_Layers = self.gnn_layers(graph, edge_mask)
 
-        Output_of_GNN_Layers.retain_grad()
+        if Output_of_GNN_Layers.requires_grad:
+            Output_of_GNN_Layers.retain_grad()
 
         sortpooled_embedings = self.sort_pool(output_of_dgcnn_layer=Output_of_GNN_Layers)
 
-        sortpooled_embedings.retain_grad()
+        if sortpooled_embedings.requires_grad:
+            sortpooled_embedings.retain_grad()
 
         output_conv1d_1, maxpooled_output_conv1d_1, output_conv1d_2, to_dense, ffn_1, dropout_ffn_1, ffn_2, softmaxed_ffn_2 = self.classic_conv(sortpooled_embedings=sortpooled_embedings, graph_sizes=graph_sizes)
 

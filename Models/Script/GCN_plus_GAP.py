@@ -29,12 +29,12 @@ import torch_geometric.nn as gnn
 from sklearn import metrics
 from time import perf_counter
 import sys
-py_path = '/data/cs.aau.dk/ey33jw/Explainability_Methods/Models/Script/Layers/'
+py_path = '/data/cs.aau.dk/ey33jw/Meta_Explainer_on_Benchmarking/Models/Script/Layers/'
 sys.path.insert(0, py_path)
 
-import GCN_Layer as gcn_layer
-import GlobalAveragePooling as globalaveragepooling
-import IdenticalPooling as identicalpooling
+from Meta_Explainer_on_Benchmarking.Models.Script.Layers import GCN_Layer as gcn_layer
+from Meta_Explainer_on_Benchmarking.Models.Script.Layers import GlobalAveragePooling as globalaveragepooling
+from Meta_Explainer_on_Benchmarking.Models.Script.Layers import IdenticalPooling as identicalpooling
 
 
 ################################################################################
@@ -57,10 +57,10 @@ class GCN_plus_GAP_Model(torch.nn.Module):
 
         if act_fun == 'ReLu':
             self.act_fun = F.relu
-            print('ReLu is Selected.')
+            # print('ReLu is Selected.')
         elif act_fun == 'eLu':
             self.act_fun = nn.functional.elu
-            print('eLu is Selected.')
+            # print('eLu is Selected.')
 
         self.GCN_Layers = torch.nn.ModuleList()
 

@@ -12,15 +12,16 @@ import torch_geometric
 import networkx as nx
 import numpy as np
 from torch_geometric.nn import GCNConv
-import sys 
+import sys
+import torch_geometric.nn as gnn
 from scipy.sparse import csr_matrix
 from torch_geometric.datasets import TUDataset
 py_path = 'Models/Script/Layers/'
 sys.path.insert(0,py_path)
-import Batched_GraphSage_Layer as batched_graphsage_layer
-import Batched_DIFFPOOL_Assignment as batched_diffpool_assignment
-import Batched_DIFFPOOL_Embedding as batched_diffpool_embedding
-import Batched_DIFFPOOL_Layer as batched_diffpool_layer
+from Meta_Explainer_on_Benchmarking.Models.Script.Layers import Batched_GraphSage_Layer as batched_graphsage_layer
+from Meta_Explainer_on_Benchmarking.Models.Script.Layers import Batched_DIFFPOOL_Assignment as batched_diffpool_assignment
+from Meta_Explainer_on_Benchmarking.Models.Script.Layers import Batched_DIFFPOOL_Embedding as batched_diffpool_embedding
+from Meta_Explainer_on_Benchmarking.Models.Script.Layers import Batched_DIFFPOOL_Layer as batched_diffpool_layer
 
 
 class GlobalMeanPool(nn.Module):
@@ -147,13 +148,13 @@ class DIFFPOOL_Model(nn.Module):
 
         if act_fun == 'ReLu':
             self.act_fun = F.relu
-            print('ReLu is Selected.')
+            # print('ReLu is Selected.')
         elif act_fun == 'eLu':
             self.act_fun = nn.functional.elu
-            print('eLu is Selected.')
+            # print('eLu is Selected.')
         elif act_fun == 'tanh':
             self.act_fun = torch.tanh
-            print('tanh is Selected.')
+            # print('tanh is Selected.')
         self.act_fun_softmax = F.softmax
 
         mean = 0
@@ -349,11 +350,11 @@ class DIFFPOOL_Model(nn.Module):
                                         torch.nn.init.zeros_(embed_party_in_modulelist.learnable_weights.bias)
                                         #print(embed_party_in_modulelist.learnable_weights.bias)
 
-    def pad_sparse_tensor(self, sparse_tensor, pad, value):
-        dense_tensor = sparse_tensor.to_dense()
-        padded_dense_tensor = F.pad(dense_tensor, pad, mode='constant', value=value)
-        padded_sparse_tensor = padded_dense_tensor.to_sparse().type(torch.float32)
-        return padded_sparse_tensor
+    def pad_adjacency_tensor(self, adjacency_tensor, pad, value):
+        if adjacency_tensor.is_sparse:
+            adjacency_tensor = adjacency_tensor.to_dense()
+        padded_tensor = F.pad(adjacency_tensor, pad, mode='constant', value=value)
+        return padded_tensor.to(torch.float32)
 
     def computational_matricess(self, batched_graphs, edge_mask):
         node_features = batched_graphs.x
@@ -396,8 +397,7 @@ class DIFFPOOL_Model(nn.Module):
 
             tilda_adj_matrix = adj_matrix + identity_sparse
             padding_offset = max_graph_size - num_nodes
-
-            padded_tilda_adj_matrix = self.pad_sparse_tensor(tilda_adj_matrix, (0, padding_offset, 0, padding_offset), value=0).unsqueeze(0)
+            padded_tilda_adj_matrix = self.pad_adjacency_tensor(tilda_adj_matrix,(0, padding_offset, 0, padding_offset),value=0).unsqueeze(0)
             adj_3d_list.append(padded_tilda_adj_matrix)
 
             one_graph_node_features = node_features[batch_tensor == graph_index]

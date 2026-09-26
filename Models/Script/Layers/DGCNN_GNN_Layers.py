@@ -40,13 +40,13 @@ class DGCNN_GNN_Layers(nn.Module):
 
         if dgcnn_act_fun == 'ReLu':
             self.dgcnn_act_fun = F.relu
-            print('ReLu is Selected.')
+            # print('ReLu is Selected.')
         elif dgcnn_act_fun == 'eLu':
             self.dgcnn_act_fun = nn.functional.elu
-            print('eLu is Selected.')
+            # print('eLu is Selected.')
         elif dgcnn_act_fun == 'tanh':
             self.dgcnn_act_fun = torch.tanh
-            print('tanh is Selected.')
+            # print('tanh is Selected.')
 
 
     def pad_sparse_tensor(self, sparse_tensor, pad, value):

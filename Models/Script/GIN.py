@@ -15,9 +15,9 @@ import sys
 from torch_geometric.datasets import TUDataset
 from torch_geometric.nn import global_add_pool
 from scipy.sparse import csr_matrix
-py_path = '/data/cs.aau.dk/ey33jw/Explainability_Methods/Models/Script/Layers/'
+py_path = '/data/cs.aau.dk/ey33jw/Meta_Explainer_on_Benchmarking/Models/Script/Layers/'
 sys.path.insert(0, py_path)
-import GIN_MLP_Layers as gin_mlp_layers
+from Meta_Explainer_on_Benchmarking.Models.Script.Layers import GIN_MLP_Layers as gin_mlp_layers
 
 
 class GlobalSUMPool(nn.Module):

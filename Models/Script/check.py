@@ -71,7 +71,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 #################################################################################################                    GIN
 
-import GIN_MLP_Layers as gin_mlp_layers
+# import GIN_MLP_Layers as gin_mlp_layers
 sys.path.insert(0, default_path+'/Models/Script')
 import GIN as gin_model
 GNN_Model = gin_model.GIN_Model(num_mlp_layers=4, Bias=True, num_slp_layers=2, mlp_input_dim=7, mlp_hid_dim=7,
@@ -214,3 +214,9 @@ train(EPOCHS, load_index, train_dataloader)
 
 
 print(GNN_Model.state_dict()['gin_mlp_layers.0.gin_mlp_layers.0.weight'])
+
+from Meta_Explainer_on_Benchmarking.GNNInterpreter_on_Graph_Classification.Script import gnninterpreter_on_graph_classification as GNNInterpreter_Module
+explanations_size = GNNInterpreter_Module.get_averaged_explanation_sizes()
+edge_limit = explanations_size["MUTAG"]["GCN_plus_GAP_Model"][0]
+print(explanations_size["Graph-SST5"]["DIFFPOOL_Model"][4])
+print(explanations_size)
