@@ -35,7 +35,8 @@ RUN_GNNS = ["GCN_plus_GAP_Model", "DGCNN_Model", "DIFFPOOL_Model", "GIN_Model", 
 # RUN_EXPLAINERS = ["GNNExplainer", "PGExplainer", "GraphMask", "SubGraphX", "CF2", "PGMExplainer", "XGNN",
 #                   "GNNInterpreter", ]
 # RUN_EXPLAINERS = ["GNNExplainer", "PGExplainer", "GraphMask", "CF2", "PGMExplainer", "XGNN", "GNNInterpreter", ]
-RUN_EXPLAINERS = ["GNNInterpreter", ]
+RUN_EXPLAINERS = ["PGExplainer", "GraphMask",]
+
 GNN_NAME_TO_INDEX_dict = {
     "GCN_plus_GAP_Model": 1,
     "DGCNN_Model": 2,
@@ -64,7 +65,7 @@ batch_size = 16
 gnn_model_loading_epoch = 5000
 classifier_weight_decay = 1e-6
 
-explainer_epoch = 1
+explainer_epoch = 1000
 explainer_learning_rate = 0.0001
 
 save_root = "/data/cs.aau.dk/ey33jw/Meta_Explainer_on_Benchmarking"

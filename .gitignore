@@ -1,9 +1,42 @@
 /Train_Models_on_Graph_Classification/Experimental_Results/
-/Dataset_Creation_for_Meta_Explainer/Experimental Results/
-# Generated experimental results / trained models
-Train_and_Evaluate_Meta_Explainer/Experimental Results/
+/Dataset_Creation_for_Meta_Explainer/Experimental_Results/
 
-Dataset_Creation_for_Meta_Explainer/Experimental Results/
+#   Generated experimental results / trained models
+/Train_and_Evaluate_Meta_Explainer/Experimental_Results/
+
+#   GNNExplainer_Experimental_Results_and_Models
+/GNNExplainer_on_Graph_Classification/Experimental_Results/
+/GNNExplainer_on_Graph_Classification/Explainer_Model/
+
+#   PGExplainer_Experimental_Results_and_Models
+/PGExplainer_on_Graph_Classification/Experimental_Results/
+/PGExplainer_on_Graph_Classification/Explainer_Model/*.pt
+/PGExplainer_on_Graph_Classification/Explainer_Model/Edge_Limit_for_XGNN_and_GNNInterpreter/Experimental_Results/
+
+#   GraphMask_Experimental_Results_and_Models
+/GraphMask_on_Graph_Classification/Experimental_Results/
+/GraphMask_on_Graph_Classification/Explainer_Model/*.pt
+/GraphMask_on_Graph_Classification/Explainer_Model/Edge_Limit_for_XGNN_and_GNNInterpreter/Experimental_Results/
+
+#   SubGraphX_Experimental_Results_and_Models
+/SubGraphX_on_Graph_Classification/Experimental_Results/
+
+#   CF2_Experimental_Results_and_Models
+/CF2_on_Graph_Classification/Experimental_Results/
+/CF2_on_Graph_Classification/Explainer_Model/
+
+#   PGM-Explainer_Experimental_Results_and_Models
+/PGMExplainer_on_Graph_Classification/Experimental_Results/
+/PGMExplainer_on_Graph_Classification/Explainer_Model/
+
+#   XGNN_Experimental_Results_and_Models
+/XGNN_on_Graph_Classification/Experimental_Results/
+/XGNN_on_Graph_Classification/Explainer_Model/
+
+#   GNNInterpreter_Experimental_Results_and_Models
+/GNNInterpreter_on_Graph_Classification/Experimental_Results/
+/GNNInterpreter_on_Graph_Classification/Explainer_Model/
+
 # Python generated files
 __pycache__/
 *.pyc
