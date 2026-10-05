@@ -98,12 +98,11 @@ class Train_GNNs_by_Optimal_Hyperparameters:
 
         ###################################################################################################                    GCN
         if self.GNN_Model_Name == "GCN_plus_GAP_Model":
-            import GCN_Layer as gcn_layer
-            import GlobalAveragePooling as globalaveragepooling
-            import IdenticalPooling as identicalpooling
-
             sys.path.insert(0, default_path+'/Models/Script')
-            import GCN_plus_GAP as gcn_plus_gap_model
+            from Meta_Explainer_on_Benchmarking.Models.Script.Layers import GCN_Layer as gcn_layer
+            from Meta_Explainer_on_Benchmarking.Models.Script.Layers import GlobalAveragePooling as globalaveragepooling
+            from Meta_Explainer_on_Benchmarking.Models.Script.Layers import IdenticalPooling as identicalpooling
+            from Meta_Explainer_on_Benchmarking.Models.Script import GCN_plus_GAP as gcn_plus_gap_model
             node_feat_size = self.entire_dataset[0].x.size()[-1]
             gcn_input_dim = {'MUTAG': node_feat_size, 'NCI1': node_feat_size, 'ENZYMES': 16, 'Graph-SST5': 64,
                              "PROTEINS": 16, 'IsCyclic': node_feat_size}
@@ -116,13 +115,12 @@ class Train_GNNs_by_Optimal_Hyperparameters:
 
         ###################################################################################################                  DGCNN
         if self.GNN_Model_Name == "DGCNN_Model":
-            import DGCNN_Layer as dgcnn_layer
-            import DGCNN_GNN_Layers as dgcnn_gnn_layers
-            import DGCNN_SortPooling_Layer as sortpooling_layer
-            import DGCNN_MLP as dgcnn_mlp
-
             sys.path.insert(0, default_path+'/Models/Script')
-            import DGCNN as dgcnn_model
+            from Meta_Explainer_on_Benchmarking.Models.Script.Layers import DGCNN_Layer as dgcnn_layer
+            from Meta_Explainer_on_Benchmarking.Models.Script.Layers import DGCNN_GNN_Layers as dgcnn_gnn_layers
+            from Meta_Explainer_on_Benchmarking.Models.Script.Layers import DGCNN_SortPooling_Layer as sortpooling_layer
+            from Meta_Explainer_on_Benchmarking.Models.Script.Layers import DGCNN_MLP as dgcnn_mlp
+            from Meta_Explainer_on_Benchmarking.Models.Script import DGCNN as dgcnn_model
 
             k_dgcnn = {'MUTAG': 17, 'NCI1': 32, 'ENZYMES': 32, 'Graph-SST5': 19, 'PROTEINS': 26, 'IsCyclic': 20}
             node_feat_size = self.entire_dataset[0].x.size()[-1]
@@ -139,12 +137,12 @@ class Train_GNNs_by_Optimal_Hyperparameters:
                                                      strides=[2, 1]).to(self.device)
         ###################################################################################################               DIFFPOOL
         if self.GNN_Model_Name == "DIFFPOOL_Model":
-            import Batched_GraphSage_Layer as batched_graphsage_layer
-            import Batched_DIFFPOOL_Assignment as batched_diffpool_assignment
-            import Batched_DIFFPOOL_Embedding as batched_diffpool_embedding
-            import Batched_DIFFPOOL_Layer as batched_diffpool_layer
             sys.path.insert(0, default_path+'/Models/Script')
-            import DIFFPOOL as diffpool_model
+            from Meta_Explainer_on_Benchmarking.Models.Script.Layers import Batched_GraphSage_Layer as batched_graphsage_layer
+            from Meta_Explainer_on_Benchmarking.Models.Script.Layers import Batched_DIFFPOOL_Assignment as batched_diffpool_assignment
+            from Meta_Explainer_on_Benchmarking.Models.Script.Layers import Batched_DIFFPOOL_Embedding as batched_diffpool_embedding
+            from Meta_Explainer_on_Benchmarking.Models.Script.Layers import Batched_DIFFPOOL_Layer as batched_diffpool_layer
+            from Meta_Explainer_on_Benchmarking.Models.Script import DIFFPOOL as diffpool_model
             node_feat_size = self.entire_dataset[0].x.size()[-1]
             self.GNN_Model = diffpool_model.DIFFPOOL_Model(embedding_input_dim=node_feat_size,
                                                            embedding_num_block_layers=1, embedding_hid_dim=64,
@@ -159,9 +157,9 @@ class Train_GNNs_by_Optimal_Hyperparameters:
                                                            pooling="mean").to(self.device)
         ###################################################################################################                    GIN
         if self.GNN_Model_Name == "GIN_Model":
-            import GIN_MLP_Layers as gin_mlp_layers
             sys.path.insert(0, default_path+'/Models/Script')
-            import GIN as gin_model
+            from Meta_Explainer_on_Benchmarking.Models.Script.Layers import GIN_MLP_Layers as gin_mlp_layers
+            from Meta_Explainer_on_Benchmarking.Models.Script import GIN as gin_model
             node_feat_size = self.entire_dataset[0].x.size()[-1]
 
             gin_input_dim = {'MUTAG': node_feat_size, 'NCI1': node_feat_size, 'ENZYMES': 16, 'Graph-SST5': 64,
@@ -208,7 +206,7 @@ class Train_GNNs_by_Optimal_Hyperparameters:
         self.num_classes = len(unique_classes)
 
         df = pandas.read_csv("/data/cs.aau.dk/ey33jw/Datasets_for_Explainability_Methods/" +
-                             "Train and Test Indexes on Graph Classification/Experimental Results/" +
+                             "Train_and_Test_Indexes_on_Graph_Classification/Experimental_Results/" +
                              "train_test_indexes_" + str(self.dataset_name) + ".csv")
 
         read_training_list_indexes__ = df['Train Indexes']
@@ -260,8 +258,8 @@ class Train_GNNs_by_Optimal_Hyperparameters:
         Real_Labels = []
 
         self.GNN_Model.train()
-        self.GNN_Model.zero_grad()
         for batch_of_graphs in self.train_dataloaded:
+            self.GNN_Model_Optimizer.zero_grad()
             batch_of_graphs = batch_of_graphs.to(self.device)
             if self.GNN_Model.__class__.__name__ == "GCN_plus_GAP_Model":
                 Output_of_Hidden_Layers, pooling_layer_output, ffn_output, soft = self.GNN_Model(batch_of_graphs, None)
@@ -269,29 +267,66 @@ class Train_GNNs_by_Optimal_Hyperparameters:
                 Pred_Labels.extend(soft.argmax(dim=1).detach().tolist())
 
             elif self.GNN_Model.__class__.__name__ == "DGCNN_Model":
-                final_GNN_layer_output, sortpooled_embedings, output_conv1d_1, maxpooled_output_conv1d_1, output_conv1d_2, to_dense, output_h1, dropout_output_h1, output_h2, softmaxed_h2 = self.GNN_Model(batch_of_graphs, None)
+                (final_GNN_layer_output, sortpooled_embedings, output_conv1d_1, maxpooled_output_conv1d_1,
+                 output_conv1d_2, to_dense, output_h1, dropout_output_h1, output_h2, softmaxed_h2) = self.GNN_Model(
+                    batch_of_graphs, None)
+
                 batch_loss = self.loss_calculations(softmaxed_h2, batch_of_graphs.y)
                 Pred_Labels.extend(softmaxed_h2.argmax(dim=1).detach().tolist())
 
             elif self.GNN_Model.__class__.__name__ == "DIFFPOOL_Model":
-                concatination_list_of_poolings, prediction_output_before_soft, prediction_output = self.GNN_Model(batch_of_graphs, None)
+                (concatination_list_of_poolings, prediction_output_before_soft, prediction_output) = self.GNN_Model(
+                    batch_of_graphs, None)
                 Pred_Labels.extend(prediction_output.argmax(dim=1).detach().tolist())
                 batch_loss = self.loss_calculations(prediction_output, batch_of_graphs.y)
 
             elif self.GNN_Model.__class__.__name__ == "GIN_Model":
-                mlps_output_embeds, mlp_outputs_globalSUMpooled, lin1_output, lin1_output_dropouted, lin2_output, lin2_output_softmaxed = self.GNN_Model(batch_of_graphs, None)
+                (mlps_output_embeds, mlp_outputs_globalSUMpooled, lin1_output, lin1_output_dropouted, lin2_output,
+                 lin2_output_softmaxed) = self.GNN_Model(batch_of_graphs, None)
                 batch_loss = self.loss_calculations(lin2_output_softmaxed, batch_of_graphs.y)
                 Pred_Labels.extend(lin2_output_softmaxed.argmax(dim=1).detach().tolist())
+
             else:
                 raise Exception("We cover GCN_plus_GAP, DGCNN, DIFFPOOL, and GIN.")
 
             Real_Labels.extend(batch_of_graphs.y.detach().tolist())
-            GNN_Model_loss_batch.append(batch_loss)
+            GNN_Model_loss_batch.append(batch_loss.detach())
+            if not torch.isfinite(batch_loss):
+                print(
+                    "[NON-FINITE LOSS]",
+                    "model =", self.GNN_Model_Name,
+                    "dataset =", self.dataset_name,
+                    "loss =", batch_loss.item(),
+                )
+                raise RuntimeError("GNN loss became non-finite.")
 
             batch_loss.backward()
-            self.GNN_Model_Optimizer.step()
+            for name, parameter in self.GNN_Model.named_parameters():
+                if parameter.grad is not None and not torch.isfinite(parameter.grad).all():
+                    print(
+                        "[NON-FINITE GRADIENT]",
+                        "model =", self.GNN_Model_Name,
+                        "dataset =", self.dataset_name,
+                        "parameter =", name,
+                        "nan =", torch.isnan(parameter.grad).sum().item(),
+                        "inf =", torch.isinf(parameter.grad).sum().item(),
+                    )
+                    raise RuntimeError("GNN gradient became non-finite.")
 
-        return torch.mean(torch.tensor(GNN_Model_loss_batch)), metrics.accuracy_score(Real_Labels, Pred_Labels)
+            self.GNN_Model_Optimizer.step()
+            for name, parameter in self.GNN_Model.named_parameters():
+                if not torch.isfinite(parameter).all():
+                    print(
+                        "[NON-FINITE PARAMETER AFTER STEP]",
+                        "model =", self.GNN_Model_Name,
+                        "dataset =", self.dataset_name,
+                        "parameter =", name,
+                        "nan =", torch.isnan(parameter).sum().item(),
+                        "inf =", torch.isinf(parameter).sum().item(),
+                    )
+                    raise RuntimeError("GNN parameter became non-finite.")
+
+        return (torch.mean(torch.stack(GNN_Model_loss_batch)), metrics.accuracy_score(Real_Labels, Pred_Labels))
 
     def start_training(self):
         GNN_Model_training_loss_per_epoch = []
@@ -414,8 +449,8 @@ class Train_GNNs_by_Optimal_Hyperparameters:
 # Datsets_Name_Dict = {1: "MUTAG", 2: "NCI1", 3: "Graph-SST5", 4: "ENZYMES", 5: "PROTEINS", 6: "IsCyclic"}
 # Weight_Initializer = {1:"XAVIER", 2:"Kaiming", 3:"Uniform"}
 # Loss Function = {1:"CrossEntropy", 2:"MAE", 3:"MSE"}
-train_the_GNN_Model = Train_GNNs_by_Optimal_Hyperparameters(GNN_Model_index=4, EPOCHS=5000, dataset_index=6, bias=True,
-                                                            winit_index=3, lr=0.00901886658315339, dropout_rate=0.466207753210106,
+train_the_GNN_Model = Train_GNNs_by_Optimal_Hyperparameters(GNN_Model_index=3, EPOCHS=5000, dataset_index=5, bias=True,
+                                                            winit_index=1, lr=0.00063418, dropout_rate=0.5303986,
                                                             batch_size=64, loss_function_index=1, weight_decay=1e-6,
                                                             act_fun="ReLu", Model_Saving_Cycle=1000,
                                                             LOSS_Visualization_Cycle=500,

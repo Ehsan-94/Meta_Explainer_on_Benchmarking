@@ -28,14 +28,13 @@ with open(params_path, "rb") as f:
 
 
 RUN_DATASETS = ["MUTAG", "NCI1", "Graph-SST5", "ENZYMES", "PROTEINS", "IsCyclic", ]
-# RUN_DATASETS = ["NCI1", "ENZYMES", "PROTEINS", ]
 
-RUN_GNNS = ["GCN_plus_GAP_Model", "DGCNN_Model", "DIFFPOOL_Model", "GIN_Model", ]
+RUN_GNNS = ["DIFFPOOL_Model",]
 
 # RUN_EXPLAINERS = ["GNNExplainer", "PGExplainer", "GraphMask", "SubGraphX", "CF2", "PGMExplainer", "XGNN",
 #                   "GNNInterpreter", ]
 # RUN_EXPLAINERS = ["GNNExplainer", "PGExplainer", "GraphMask", "CF2", "PGMExplainer", "XGNN", "GNNInterpreter", ]
-RUN_EXPLAINERS = ["PGExplainer", "GraphMask",]
+RUN_EXPLAINERS = ["PGExplainer", "GraphMask"]
 
 GNN_NAME_TO_INDEX_dict = {
     "GCN_plus_GAP_Model": 1,
@@ -122,7 +121,8 @@ for DataSet_name in RUN_DATASETS:
                 print(f"[SKIP] Manual exclusion: "f"{DataSet_name} | {GNN_name} | {Explainer_Name}")
                 continue
             if not running_file_checker.should_run(dataset_name=DataSet_name, gnn_name=GNN_name,
-                                                   explainer_name=Explainer_Name):
+                                                   explainer_name=Explainer_Name, task_name="Graph_Classification",
+                                                   verbose=True, explainer_mode=EXPLAINER_MODES_dict[Explainer_Name]):
                 continue
 
             print("\nRUN:", f"dataset={DataSet_name}", f"gnn={GNN_name}", f"explainer={Explainer_Name}")

@@ -122,6 +122,24 @@ class load_GNN_Models:
                                           "Train_Models_on_Graph_Classification/Experimental_Results/" +
                                           self.GNN_Model_Name + "/" + self.GNN_Model_Name + "_" + self.dataset_name +
                                           "_" + str(self.gnn_model_loading_epoch) + ".pt", map_location=self.device)
+
+
+        for parameter_name, parameter_value in GNN_Model_state_dict["model_state_dict"].items():
+
+            if torch.is_tensor(parameter_value) and not torch.isfinite(parameter_value).all():
+                print(
+                    "[NON-FINITE PARAMETER IN SAVED CHECKPOINT]",
+                    "dataset =", self.dataset_name,
+                    "model =", self.GNN_Model_Name,
+                    "parameter =", parameter_name,
+                    "shape =", tuple(parameter_value.shape),
+                    "nan =", torch.isnan(parameter_value).sum().item(),
+                    "inf =", torch.isinf(parameter_value).sum().item(),
+                )
+
+                raise RuntimeError(
+                    "Saved GNN checkpoint already contains non-finite parameters."
+                )
         # print("self.bias: ", self.bias)
         if self.bias == False:
             keys_to_remove = [key for key in GNN_Model_state_dict['model_state_dict'].keys() if 'bias' in key]

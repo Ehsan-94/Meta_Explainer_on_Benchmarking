@@ -40,24 +40,18 @@ class GNN_Batched_GraphSage_Layer(nn.Module):
 
     def forward(self, new_features, tilda_adjacency_matrix):
 
-        #new_features = new_features.to(torch.float32)
-        new_features = new_features.type(torch.float32)
-        tilda_adjacency_matrix = tilda_adjacency_matrix.type(torch.float32)
-
+        new_features = new_features.to(dtype=torch.float32)
+        tilda_adjacency_matrix = tilda_adjacency_matrix.to(dtype=torch.float32)
 
         if self.aggregation == 'mean':
-            tilda_adjacency_matrix = tilda_adjacency_matrix / (tilda_adjacency_matrix.sum(-2, keepdim=False).unsqueeze(dim=-2))
-        tilda_adjacency_matrix = torch.nan_to_num(tilda_adjacency_matrix, nan=0)
-
-        aggregated_neghborhood = torch.bmm(tilda_adjacency_matrix, new_features) # Y = A~ * X
-        
+            adjacency_sum = tilda_adjacency_matrix.sum(-2, keepdim=False).unsqueeze(dim=-2)
+            adjacency_sum = adjacency_sum.clamp_min(1e-12)
+            tilda_adjacency_matrix = (tilda_adjacency_matrix / adjacency_sum)
+        aggregated_neghborhood = torch.bmm(tilda_adjacency_matrix, new_features)
         if self.concat:
-            aggregated_neghborhood = torch.cat((aggregated_neghborhood, new_features), 2)
-
-        node_linear = self.learnable_weights(aggregated_neghborhood) # Y * W
-
+            aggregated_neghborhood = torch.cat((aggregated_neghborhood, new_features),2)
+        node_linear = self.learnable_weights(aggregated_neghborhood)
         if self.normalize_graphsage:
             node_linear = self.normalize(node_linear, p=2, dim=2)
-        node_linear = torch.nan_to_num(node_linear, nan=0)
 
         return node_linear
