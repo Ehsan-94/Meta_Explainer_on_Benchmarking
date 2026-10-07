@@ -27,14 +27,14 @@ with open(params_path, "rb") as f:
     all_parameters = pickle.load(f)
 
 
-RUN_DATASETS = ["MUTAG", "NCI1", "Graph-SST5", "ENZYMES", "PROTEINS", "IsCyclic", ]
-
+# RUN_DATASETS = ["MUTAG", "NCI1", "Graph-SST5", "ENZYMES", "PROTEINS", "IsCyclic", ]
+RUN_DATASETS = ["Graph-SST5"]
 RUN_GNNS = ["DIFFPOOL_Model",]
 
 # RUN_EXPLAINERS = ["GNNExplainer", "PGExplainer", "GraphMask", "SubGraphX", "CF2", "PGMExplainer", "XGNN",
 #                   "GNNInterpreter", ]
 # RUN_EXPLAINERS = ["GNNExplainer", "PGExplainer", "GraphMask", "CF2", "PGMExplainer", "XGNN", "GNNInterpreter", ]
-RUN_EXPLAINERS = ["PGExplainer", "GraphMask"]
+RUN_EXPLAINERS = ["GraphMask"]
 
 GNN_NAME_TO_INDEX_dict = {
     "GCN_plus_GAP_Model": 1,
@@ -64,7 +64,7 @@ batch_size = 16
 gnn_model_loading_epoch = 5000
 classifier_weight_decay = 1e-6
 
-explainer_epoch = 1000
+explainer_epoch = 10
 explainer_learning_rate = 0.0001
 
 save_root = "/data/cs.aau.dk/ey33jw/Meta_Explainer_on_Benchmarking"

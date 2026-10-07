@@ -47,6 +47,7 @@ import csv
 from torch_geometric.nn import GCNConv, global_mean_pool
 from torch_geometric.loader import DataLoader
 import torch_geometric.nn as gnn
+from tqdm import tqdm
 
 
 
@@ -228,8 +229,9 @@ class GraphMask:
                         soft_NOT_MASKED = self.GNN_Model(batch_of_graphs, None)
                 GNN_Model_preds_NOT_MASKED.append(soft_NOT_MASKED.detach())
 
-        for epoch in range(self.explainer_epochs):
-            #print("Epoch: ", epoch)
+        for epoch in tqdm(range(self.explainer_epochs),
+                          desc=f"GraphMask | {self.dataset_name} | {self.Model_Name} | Class {target_class}",
+                          unit="epoch"):
             edge_mask = self.train_step_explainer(merged_embeddings_list, GNN_Model, your_dataset, GNN_Model_preds_NOT_MASKED, target_class)
             edge_masks_per_epoch.append(edge_mask)
             if (epoch + 1) == self.explainer_save_index:

@@ -32,6 +32,7 @@ from IPython.core.display import deepcopy
 from torch_geometric.nn import MessagePassing
 import copy
 from time import perf_counter
+from tqdm import tqdm
 
 class PGExplainer:
     coeffs = {'edge_size': 0.05,
@@ -119,8 +120,9 @@ class PGExplainer:
                         soft_NOT_MASKED = self.GNN_Model(batch_of_graphs, None)
                 GNN_Model_preds_NOT_MASKED.append(soft_NOT_MASKED.detach())
 
-        for epoch in range(self.explainer_epochs):
-            #print("Epoch: ", epoch)
+        for epoch in tqdm(range(self.explainer_epochs),
+                          desc=f"PGExplainer | {self.dataset_name} | {self.GNN_Model.__class__.__name__} | Class {target_class}",
+                          unit="epoch"):
             temperature = self.compute_temp(epoch)
             edge_mask = self.train_step_explainer(merged_embeddings_list, GNN_Model, your_dataset, temperature, GNN_Model_preds_NOT_MASKED, target_class)
             edge_masks_per_epoch.append(edge_mask)
