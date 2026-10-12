@@ -39,21 +39,22 @@ from Meta_Explainer_on_Benchmarking.Models.Script.Layers import IdenticalPooling
 
 ################################################################################
 class GCN_plus_GAP_Model(torch.nn.Module):
-    def __init__(self, GNN_layers, num_classes, Bias, act_fun, Weight_Initializer, dropout_rate, model_level, pred_hidden_dims=[]):
+    def __init__(self, gnn_layers, num_classes, bias, act_fun, weight_initializer_index, dropout_rate, model_level, pred_hidden_dims=[]):
+        self.model_level = model_level
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.GNN_layers = GNN_layers
-        self.input_dim = GNN_layers[0]
-        self.output_dim = GNN_layers[-1]
-        self.num_GNN_layers = len(GNN_layers)
+        self.gnn_layers = gnn_layers
+        self.input_dim = gnn_layers[0]
+        self.output_dim = gnn_layers[-1]
+        self.num_GNN_layers = len(gnn_layers)
         self.num_classes = num_classes
-        self.Bias = Bias
+        self.bias = bias
 
         super(GCN_plus_GAP_Model, self).__init__()
-        print('GCN Layer Input_Dimension:', self.input_dim)
-
-        print('GCN Layer Number_of_Layers:', self.num_GNN_layers)
-
-        print('GCN Layer Output_Dimension:', self.output_dim)
+        # print('GCN Layer Input_Dimension:', self.input_dim)
+        #
+        # print('GCN Layer Number_of_Layers:', self.num_GNN_layers)
+        #
+        # print('GCN Layer Output_Dimension:', self.output_dim)
 
         if act_fun == 'ReLu':
             self.act_fun = F.relu
@@ -66,47 +67,52 @@ class GCN_plus_GAP_Model(torch.nn.Module):
 
         for i in range(self.num_GNN_layers):
             if self.num_GNN_layers == 1:
-                self.GCN_Layers.append(gcn_layer.GCN_Layer(self.input_dim, self.output_dim, Bias=self.Bias))
+                self.GCN_Layers.append(gcn_layer.GCN_Layer(self.input_dim, self.output_dim, bias=self.bias))
             elif self.num_GNN_layers > 1:
                 if i == 0:
-                    self.GCN_Layers.append(gcn_layer.GCN_Layer(self.input_dim, self.GNN_layers[i], Bias=self.Bias))
+                    self.GCN_Layers.append(gcn_layer.GCN_Layer(self.input_dim, self.gnn_layers[i], bias=self.bias))
                 elif i == self.num_GNN_layers-1:
-                    self.GCN_Layers.append(gcn_layer.GCN_Layer(self.GNN_layers[i-1], self.output_dim, Bias=self.Bias))
+                    self.GCN_Layers.append(gcn_layer.GCN_Layer(self.gnn_layers[i-1], self.output_dim, bias=self.bias))
                 elif 0 < i < self.num_GNN_layers-1:
-                    self.GCN_Layers.append(gcn_layer.GCN_Layer(self.GNN_layers[i-1], self.GNN_layers[i], Bias=self.Bias))
+                    self.GCN_Layers.append(gcn_layer.GCN_Layer(self.gnn_layers[i-1], self.gnn_layers[i], bias=self.bias))
             else:
                 print("please enter layer config")
 
         self.dropout = nn.Dropout(p=dropout_rate)
 
-        if model_level == 'node':
+        if self.model_level == 'node':
             self.readout = identicalpooling.IdenticalPooling()
         else:
             self.readout = globalaveragepooling.GlobalAveragePooling()
 
-        self.ffn = nn.Linear(self.output_dim, self.num_classes, bias=self.Bias)
+        self.ffn = nn.Linear(self.output_dim, self.num_classes, bias=self.bias)
         self.to(self.device)
 
         mean = 0
         std = 0.1
-        self.initialize_weights(Weight_Initializer, self.Bias, mean, std)
+        self.initialize_weights(weight_initializer_index, self.bias, mean, std)
 
-    def initialize_weights(model, Weight_Initializer, Bias, mean, std):
+    def initialize_weights(model, weight_initializer_index, bias, mean, std):
+        if weight_initializer_index not in (1, 2, 3):
+            raise ValueError(
+                "Weight_Initializer must be 1 (Xavier), "
+                "2 (Kaiming), or 3 (Normal)."
+            )        
         # 1. Xavier Normal_.  2. Kaiming Normal_.  3. Uniform (0,0.1std)
-        if Weight_Initializer == 1:                                             #.      1. Xavier Normal_.
+        if weight_initializer_index == 1:                                             #.      1. Xavier Normal_.
             for i,layers in enumerate(model.children()):
                 if isinstance(layers, torch.nn.ModuleList):
                     for j, layer in enumerate(layers.modules()):
                         if isinstance(layer, gcn_layer.GCN_Layer):
                             torch.nn.init.xavier_normal_(layer.conv_params.weight.data)
-                            if Bias:
+                            if bias:
                                 layer.conv_params.bias.data.zero_()
                         else:
                             pass
                 if isinstance(layers, torch.nn.Linear):
                     # print("Dense before message passing: ", layers.weight)
                     torch.nn.init.xavier_normal_(layers.weight)
-                    if Bias:
+                    if bias:
                         layers.bias.data.zero_()
                 elif isinstance(layers, (globalaveragepooling.GlobalAveragePooling)):
                     #print(i, "   GAP:      ",  layers)
@@ -115,21 +121,21 @@ class GCN_plus_GAP_Model(torch.nn.Module):
                     #print(i, "   IAP:      ",  layers)
                     pass
 
-        if Weight_Initializer == 2:                                             #.      2. Kaiming Normal_.
+        if weight_initializer_index == 2:                                             #.      2. Kaiming Normal_.
             for i,layers in enumerate(model.children()):
                 #print("no condition: ", i, layers)
                 if isinstance(layers, torch.nn.ModuleList):
                     for j, layer in enumerate(layers.modules()):
                         if isinstance(layer, gcn_layer.GCN_Layer):
                             torch.nn.init.kaiming_normal_(layer.conv_params.weight.data)
-                            if Bias:
+                            if bias:
                                 layer.conv_params.bias.data.zero_()
                         else:
                             pass
                 if isinstance(layers, torch.nn.Linear):
                     # print("Dense before message passing: ", layers.weight)
                     torch.nn.init.kaiming_normal_(layers.weight)
-                    if Bias:
+                    if bias:
                         layers.bias.data.zero_()
                 elif isinstance(layers, (globalaveragepooling.GlobalAveragePooling)):
                     #print(i, "   GAP:      ",  layers)
@@ -138,20 +144,20 @@ class GCN_plus_GAP_Model(torch.nn.Module):
                     #print(i, "   IAP:      ",  layers)
                     pass
 
-        if Weight_Initializer == 3:                                             #.      3. Uniform (0,0.1std)
+        if weight_initializer_index == 3:                                             #.      3. Uniform (0,0.1std)
             for i,layers in enumerate(model.children()):
                 if isinstance(layers, torch.nn.ModuleList):
                     for j, layer in enumerate(layers.modules()):
                         if isinstance(layer, gcn_layer.GCN_Layer):
                             torch.nn.init.normal_(layer.conv_params.weight.data, mean, std)
-                            if Bias:
+                            if bias:
                                 layer.conv_params.bias.data.zero_()
                         else:
                             pass
                 if isinstance(layers, torch.nn.Linear):
                     # print("Dense before message passing: ", layers.weight)
                     torch.nn.init.normal_(layers.weight, mean, std)
-                    if Bias:
+                    if bias:
                         layers.bias.data.zero_()
                 elif isinstance(layers, (globalaveragepooling.GlobalAveragePooling)):
                     #print(i, "   GAP:      ",  layers)
@@ -199,6 +205,13 @@ class GCN_plus_GAP_Model(torch.nn.Module):
         node_features = batched_graphs.x
         edge_index = batched_graphs.edge_index
         batch_tensor = batched_graphs.batch
+        if edge_mask is not None:
+            if edge_mask.ndim != 1 or edge_mask.numel() != edge_index.size(1):
+                raise ValueError("Expected one mask value per edge.")
+            if not torch.isfinite(edge_mask).all().item():
+                raise ValueError("Edge mask contains nonfinite values.")
+            if (edge_mask < 0).any().item():
+                raise ValueError("Negative edge weights are unsupported by this normalization.")
 
         if batch_tensor is not None:
             batch_tensor = batch_tensor.to(edge_index.device)
@@ -223,13 +236,14 @@ class GCN_plus_GAP_Model(torch.nn.Module):
 
             local_edge_index[0] = torch.tensor([node_map[n.item()] for n in local_edge_index[0]], dtype=torch.long, device=edge_index.device)
             local_edge_index[1] = torch.tensor([node_map[n.item()] for n in local_edge_index[1]], dtype=torch.long, device=edge_index.device)
+            adjacency_indices = local_edge_index.flip(0)
             num_nodes = one_graph_node_indices.size(0)
 
             if edge_mask is None:
-                adj_matrix = torch.sparse_coo_tensor(local_edge_index, torch.ones(local_edge_index.shape[1], dtype=torch.float32, device=edge_index.device), (num_nodes, num_nodes))
+                adj_matrix = torch.sparse_coo_tensor(adjacency_indices, torch.ones(local_edge_index.shape[1], dtype=torch.float32, device=edge_index.device), (num_nodes, num_nodes))
             else:
                 local_edge_mask = edge_mask[edge_index_intersection]
-                adj_matrix = torch.sparse_coo_tensor(local_edge_index, local_edge_mask, (num_nodes, num_nodes))
+                adj_matrix = torch.sparse_coo_tensor(adjacency_indices, local_edge_mask, (num_nodes, num_nodes))
 
             identity_indices = torch.arange(num_nodes, device=adj_matrix.device)
             identity_values = torch.ones(num_nodes, dtype=torch.float32, device=adj_matrix.device)
@@ -277,9 +291,9 @@ class GCN_plus_GAP_Model(torch.nn.Module):
         # print("old batch: ", batch)
         # batch = self.update_batch_tensor_for_fixed_size(batch, x.size(1))
         # print("new batch: ", batch)
-        pooling_layer_output = self.readout(x)
+        pooling_layer_output = self.readout(x, graph_sizes)
         ffn_output = self.ffn(pooling_layer_output)
-        ffn_output = self.act_fun(ffn_output)
+        # ffn_output = self.act_fun(ffn_output)
 
         # log_soft = F.log_softmax(ffn_output, dim=1)
         soft = F.softmax(ffn_output, dim=1)

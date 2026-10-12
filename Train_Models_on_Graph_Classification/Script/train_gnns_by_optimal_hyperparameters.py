@@ -48,7 +48,7 @@ from itertools import chain
 from time import perf_counter
 import csv
 import pickle
-
+from tqdm import tqdm
 
 
 
@@ -76,7 +76,8 @@ class Train_GNNs_by_Optimal_Hyperparameters:
 
         self.GNN_Model_Name = self.GNN_Models_Name[GNN_Model_index]
         self.dataset_name = self.Datsets_Name_Dict[dataset_index]
-        self.weight_initializer = self.Weight_Initializer[winit_index]
+        self.weight_initializer = winit_index
+        self.weight_initializer_name = self.Weight_Initializer[winit_index]
         self.loss_function = self.Loss_Function[loss_function_index]
 
         self.EPOCHS = EPOCHS
@@ -231,9 +232,18 @@ class Train_GNNs_by_Optimal_Hyperparameters:
         test_dataloader = DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False)
         return train_dataloader, test_dataloader
 
-    def loss_calculations(self, preds, gtruth):
-        loss_per_epoch = self.criterion(preds, gtruth)
-        return loss_per_epoch
+    def loss_calculations(self, class_scores, probabilities, labels):
+        labels = labels.reshape(-1).long()
+
+        if self.loss_function == "CrossEntropy":
+            return self.criterion(class_scores, labels)
+
+        elif self.loss_function in ("MAE", "MSE"):
+            targets = F.one_hot(labels, num_classes=self.num_classes,).to(device=probabilities.device, dtype=probabilities.dtype,)
+
+            return self.criterion(probabilities, targets)
+
+        raise ValueError(f"Unsupported loss: {self.loss_function}")
 
     def visualize_losses(self, GNN_Model_losses, epoch_history):
         GNN_Model_losses_list = torch.stack(GNN_Model_losses).cpu().detach().numpy()
@@ -263,27 +273,28 @@ class Train_GNNs_by_Optimal_Hyperparameters:
             batch_of_graphs = batch_of_graphs.to(self.device)
             if self.GNN_Model.__class__.__name__ == "GCN_plus_GAP_Model":
                 Output_of_Hidden_Layers, pooling_layer_output, ffn_output, soft = self.GNN_Model(batch_of_graphs, None)
-                batch_loss = self.loss_calculations(soft, batch_of_graphs.y)
+                batch_loss = self.loss_calculations(class_scores=ffn_output, probabilities=soft, labels=batch_of_graphs.y,)
                 Pred_Labels.extend(soft.argmax(dim=1).detach().tolist())
 
             elif self.GNN_Model.__class__.__name__ == "DGCNN_Model":
                 (final_GNN_layer_output, sortpooled_embedings, output_conv1d_1, maxpooled_output_conv1d_1,
                  output_conv1d_2, to_dense, output_h1, dropout_output_h1, output_h2, softmaxed_h2) = self.GNN_Model(
                     batch_of_graphs, None)
-
-                batch_loss = self.loss_calculations(softmaxed_h2, batch_of_graphs.y)
+                batch_loss = self.loss_calculations(class_scores=output_h2, probabilities=softmaxed_h2, labels=batch_of_graphs.y,)
                 Pred_Labels.extend(softmaxed_h2.argmax(dim=1).detach().tolist())
 
             elif self.GNN_Model.__class__.__name__ == "DIFFPOOL_Model":
                 (concatination_list_of_poolings, prediction_output_before_soft, prediction_output) = self.GNN_Model(
                     batch_of_graphs, None)
                 Pred_Labels.extend(prediction_output.argmax(dim=1).detach().tolist())
-                batch_loss = self.loss_calculations(prediction_output, batch_of_graphs.y)
+                batch_loss = self.loss_calculations(class_scores=prediction_output_before_soft,
+                                                    probabilities=prediction_output, labels=batch_of_graphs.y, )
 
             elif self.GNN_Model.__class__.__name__ == "GIN_Model":
                 (mlps_output_embeds, mlp_outputs_globalSUMpooled, lin1_output, lin1_output_dropouted, lin2_output,
                  lin2_output_softmaxed) = self.GNN_Model(batch_of_graphs, None)
-                batch_loss = self.loss_calculations(lin2_output_softmaxed, batch_of_graphs.y)
+                batch_loss = self.loss_calculations(class_scores=lin2_output, probabilities=lin2_output_softmaxed,
+                                                    labels=batch_of_graphs.y, )
                 Pred_Labels.extend(lin2_output_softmaxed.argmax(dim=1).detach().tolist())
 
             else:
@@ -331,7 +342,7 @@ class Train_GNNs_by_Optimal_Hyperparameters:
     def start_training(self):
         GNN_Model_training_loss_per_epoch = []
 
-        for epoch in range(self.EPOCHS):
+        for epoch in tqdm(range(self.EPOCHS), desc=f" | {self.dataset_name} | {self.GNN_Model_Name}", unit="epoch"):
             t1 = perf_counter()
             GNN_Model_training_loss, training_acc = self.train_step()
             self.GNN_Model_training_time_per_epoch.append(perf_counter()-t1)
@@ -449,8 +460,8 @@ class Train_GNNs_by_Optimal_Hyperparameters:
 # Datsets_Name_Dict = {1: "MUTAG", 2: "NCI1", 3: "Graph-SST5", 4: "ENZYMES", 5: "PROTEINS", 6: "IsCyclic"}
 # Weight_Initializer = {1:"XAVIER", 2:"Kaiming", 3:"Uniform"}
 # Loss Function = {1:"CrossEntropy", 2:"MAE", 3:"MSE"}
-train_the_GNN_Model = Train_GNNs_by_Optimal_Hyperparameters(GNN_Model_index=3, EPOCHS=5000, dataset_index=5, bias=True,
-                                                            winit_index=1, lr=0.00063418, dropout_rate=0.5303986,
+train_the_GNN_Model = Train_GNNs_by_Optimal_Hyperparameters(GNN_Model_index=1, EPOCHS=5000, dataset_index=3, bias=True,
+                                                            winit_index=2, lr=0.000398845, dropout_rate=0.376534632,
                                                             batch_size=64, loss_function_index=1, weight_decay=1e-6,
                                                             act_fun="ReLu", Model_Saving_Cycle=1000,
                                                             LOSS_Visualization_Cycle=500,

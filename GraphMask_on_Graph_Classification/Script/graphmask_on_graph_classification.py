@@ -457,6 +457,287 @@ class GraphMask:
         else:
             print("recheck")
 
+class Hooking_GCN_plus_GAP_Model_for_GraphMask:
+    def __init__(self, gnn_model):
+        self.GNN_Model = gnn_model
+
+    @torch.no_grad()
+    def hooking_reference_forward(self, graph):
+        self.GNN_Model.eval()
+
+        device = next(self.GNN_Model.parameters()).device
+        graph = graph.to(device)
+
+        # Use the original graph: no edge masking.
+        adjacency, degree_norm, x = self.GNN_Model.computational_matrices(graph, None)
+
+        layer_inputs = []
+        hidden_outputs = []
+
+        for layer in self.GNN_Model.GCN_Layers:
+            # These states will later be used by this layer's gate network.
+            layer_inputs.append(x.detach().clone())
+
+            # Preserve the original GCN computation.
+            x = layer(x, adjacency, degree_norm)
+            x = self.GNN_Model.act_fun(x)
+            x = self.GNN_Model.dropout(x)
+
+            hidden_outputs.append(x)
+
+        pooling_output = self.GNN_Model.readout(x)
+        classifier_output = self.GNN_Model.ffn(pooling_output)
+        classifier_output = self.GNN_Model.act_fun(classifier_output)
+        probabilities = F.softmax(classifier_output, dim=1)
+
+        return {"layer_inputs": layer_inputs,
+                "hidden_outputs": hidden_outputs,
+                "pooling_output": pooling_output,
+                "classifier_output": classifier_output,
+                "probabilities": probabilities,}
+
+    def hooking_masked_forward(self, graph, gates, baselines):
+        self.GNN_Model.eval()
+
+        device = next(self.GNN_Model.parameters()).device
+        graph = graph.to(device)
+
+        gnn_layers = self.GNN_Model.GCN_Layers
+
+        if len(gates) != len(gnn_layers):
+            raise ValueError("Provide one gate matrix per GCN layer.")
+
+        if len(baselines) != len(gnn_layers):
+            raise ValueError("Provide one baseline vector per GCN layer.")
+
+        # Always use the original graph and its normalization.
+        adjacency, degree_norm, x = (self.GNN_Model.computational_matrices(graph, None))
+
+        if adjacency.layout != torch.strided:
+            adjacency = adjacency.to_dense()
+
+        # Preserve the multiplication order used by GCN_Layer.forward().
+        normalized_adj = torch.bmm(degree_norm, torch.bmm(adjacency, degree_norm),)
+
+        hidden_outputs = []
+
+        for layer_index, layer in enumerate(gnn_layers):
+            gate = gates[layer_index].to(device=x.device, dtype=x.dtype)
+            baseline = baselines[layer_index].to(device=x.device, dtype=x.dtype)
+
+            if gate.shape != normalized_adj.shape:
+                raise ValueError(
+                    f"Layer {layer_index}: gate shape {tuple(gate.shape)} "
+                    f"must match {tuple(normalized_adj.shape)}."
+                )
+
+            expected_baseline_shape = (layer.conv_params.out_features,)
+
+            if baseline.shape != expected_baseline_shape:
+                raise ValueError(
+                    f"Layer {layer_index}: baseline shape "
+                    f"{tuple(baseline.shape)} must match "
+                    f"{expected_baseline_shape}."
+                )
+
+            # Keep self-contributions open for our initial implementation.
+            # torch.where also excludes diagonal gates from gradient updates.
+            diagonal = torch.eye(normalized_adj.size(-1), device=x.device, dtype=torch.bool,).unsqueeze(0)
+
+            gate = torch.where(diagonal, torch.ones_like(gate), gate)
+
+            kept_adj = normalized_adj * gate
+            replaced_adj = normalized_adj * (1 - gate)
+
+            # Retain original source contributions for open gates.
+            aggregated = torch.bmm(kept_adj, x)
+            x = layer.conv_params(aggregated)
+
+            # Replace suppressed contributions with the learned baseline.
+            replacement_weight = replaced_adj.sum(dim=-1, keepdim=True)
+            x = x + replacement_weight * baseline.view(1, 1, -1)
+
+            x = self.GNN_Model.act_fun(x)
+            x = self.GNN_Model.dropout(x)
+
+            hidden_outputs.append(x)
+
+        pooling_output = self.GNN_Model.readout(x)
+        classifier_output = self.GNN_Model.ffn(pooling_output)
+        classifier_output = self.GNN_Model.act_fun(classifier_output)
+        probabilities = F.softmax(classifier_output, dim=1)
+
+        return {"hidden_outputs": hidden_outputs,
+                "pooling_output": pooling_output,
+                "classifier_output": classifier_output,
+                "probabilities": probabilities,}
+
+
+class GCN_GraphMask_Gates(nn.Module):
+    def __init__(self, gnn_model, hidden_dim=64):
+        super().__init__()
+
+        layers = gnn_model.GCN_Layers
+        device = next(gnn_model.parameters()).device
+        dtype = next(gnn_model.parameters()).dtype
+
+        # Infer dimensions from the actual trained GCN.
+        self.gate_networks = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(
+                    2 * layer.conv_params.in_features,
+                    hidden_dim,
+                    ),
+                nn.LayerNorm(hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, 1),
+            )
+            for layer in layers
+        ])
+
+        # One shared replacement vector per layer.
+        self.baselines = nn.ParameterList([nn.Parameter(torch.zeros(layer.conv_params.out_features)) for layer in layers])
+
+        self.temperature = 1 / 3
+        self.lower = -0.2
+        self.upper = 1.0
+        self.location_bias = 2.0
+
+        # Start with location logits close to the initial open-gate bias.
+        for network in self.gate_networks:
+            nn.init.normal_(network[-1].weight, mean=0.0, std=0.01)
+            nn.init.zeros_(network[-1].bias)
+
+        self.to(device=device, dtype=dtype)
+
+    def sample_gates(self, raw_logits):
+        logits = raw_logits + self.location_bias
+
+        # Expected nonzero probability: the sparsity objective.
+        p_nonzero = torch.sigmoid(logits - self.temperature * math.log(-self.lower / self.upper))
+
+        if self.training:
+            u = torch.rand_like(logits).clamp(1e-6, 1 - 1e-6)
+            s = torch.sigmoid((torch.log(u) - torch.log1p(-u) + logits) / self.temperature)
+        else:
+            # Deterministic inference gate.
+            s = torch.sigmoid(logits)
+
+        gates = (s * (self.upper - self.lower) + self.lower).clamp(0, 1)
+
+        return gates, p_nonzero
+
+    def forward(self, graph, layer_inputs):
+        if len(layer_inputs) != len(self.gate_networks):
+            raise ValueError("Expected one input tensor per GCN layer.")
+
+        device = self.baselines[0].device
+        graph = graph.to(device)
+
+        if graph.batch is None:
+            node_batch = torch.zeros(graph.num_nodes, device=device, dtype=torch.long,)
+            ptr = torch.tensor([0, graph.num_nodes], device=device, dtype=torch.long,)
+        else:
+            node_batch = graph.batch
+            ptr = graph.ptr
+
+        sizes = (ptr[1:] - ptr[:-1]).tolist()
+        row, col = graph.edge_index
+
+        if not torch.equal(node_batch[row], node_batch[col]):
+            raise ValueError("An edge connects nodes in different graphs.")
+
+        edge_graph = node_batch[row]
+        local_row = row - ptr[edge_graph]
+        local_col = col - ptr[edge_graph]
+
+        # Self-loops are always open and excluded from sparsity.
+        neighbor_edges = row != col
+
+        gate_matrices = []
+        edge_gates_per_layer = []
+        edge_scores_per_layer = []
+        penalties_per_layer = []
+
+        for layer_index, (network, padded_states) in enumerate(zip(self.gate_networks, layer_inputs)):
+            padded_states = padded_states.detach().to(device)
+
+            batch_size, max_nodes, _ = padded_states.shape
+
+            if batch_size != len(sizes):
+                raise ValueError("Graph batch and padded states do not match.")
+
+            # Restore PyG's original concatenated node order.
+            flat_states = torch.cat([padded_states[i, :size] for i, size in enumerate(sizes)], dim=0)
+
+            edge_features = torch.cat([flat_states[row], flat_states[col],], dim=-1)
+
+            raw_logits = network(edge_features).squeeze(-1)
+            edge_gates, edge_scores = self.sample_gates(raw_logits)
+
+            edge_gates = torch.where(neighbor_edges, edge_gates, torch.ones_like(edge_gates),)
+            edge_scores = torch.where(neighbor_edges, edge_scores, torch.ones_like(edge_scores),)
+
+            # Preserve the adjacency orientation used by your GCN:
+            # edge_index[0] maps to the matrix row.
+            flat_positions = (edge_graph * max_nodes * max_nodes + local_row * max_nodes + local_col)
+
+            # A dense matrix needs one gate per adjacency entry.
+            if torch.unique(flat_positions).numel() != flat_positions.numel():
+                raise ValueError(
+                    "Duplicate edges detected. Handle duplicate-edge "
+                    "aggregation before mapping gates to a dense matrix."
+                )
+
+            # Nonedges have zero adjacency weight, so their gate values
+            # do not affect the computation. Diagonals start open.
+            flat_matrix = torch.ones(batch_size * max_nodes * max_nodes, device=device, dtype=padded_states.dtype,)
+
+            # Out-of-place scatter preserves gradients to edge gates.
+            flat_matrix = flat_matrix.scatter(0, flat_positions, edge_gates)
+
+            gate_matrices.append(flat_matrix.view(batch_size, max_nodes, max_nodes))
+            edge_gates_per_layer.append(edge_gates)
+            edge_scores_per_layer.append(edge_scores)
+
+            # Expected retained directed messages for this layer.
+            penalties_per_layer.append(edge_scores[neighbor_edges].sum())
+
+        return {"gate_matrices": gate_matrices,
+                "edge_gates": edge_gates_per_layer,
+                "edge_scores": edge_scores_per_layer,
+                "expected_retained_messages": torch.stack(
+                    penalties_per_layer
+                ).sum(),}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class GraphMask_Manager:

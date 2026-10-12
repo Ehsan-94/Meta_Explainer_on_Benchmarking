@@ -4,13 +4,13 @@ class GCN_Layer(nn.Module):
     """
         A single GCN Layer, using propagation matrix defined by Kipf et al. in GCN
     """
-    def __init__(self, input_dim, latent_dim, Bias):
+    def __init__(self, input_dim, latent_dim, bias):
 
         super(GCN_Layer, self).__init__()
         self.input_dim = input_dim
         self.latent_dim = latent_dim
-        self.Bias = Bias
-        self.conv_params = nn.Linear(input_dim, latent_dim, bias=self.Bias)
+        self.bias = bias
+        self.conv_params = nn.Linear(input_dim, latent_dim, bias=self.bias)
 
 
     def forward(self, input_tensor, tilda_adjacency_matrix, padded_reciprocal_sqrt_degree):

@@ -40,4 +40,4 @@ class MySpMM(torch.autograd.Function):
 
 
 def gnn_spmm(sp_mat, dense_mat):
-	return MySpMM.apply(sp_mat, dense_mat)
+	return torch.sparse.mm(sp_mat, dense_mat)
