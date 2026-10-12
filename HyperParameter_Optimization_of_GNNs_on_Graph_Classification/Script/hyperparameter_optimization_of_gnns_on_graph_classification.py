@@ -245,9 +245,9 @@ class GNN_Models_HyperParameter_Optimization:
             Models = {}
             k_dgcnn = {'MUTAG': 17, 'NCI1': 32, 'ENZYMES': 32, 'Graph-SST5': 19, 'PROTEINS': 26, 'IsCyclic': 20}
             node_feat_size = your_dataset[0].x.size()[-1]
-            dgcnn_input_dim = {'MUTAG': [32, 32, 32, 32], 'NCI1': [32, 32, 32, 32], 'ENZYMES': [32, 32, 32, 32],
-                               'Graph-SST5': [64, 64, 64, 64], 'PROTEINS': [32, 32, 32, 32],
-                               'IsCyclic': [32, 32, 32, 32]}
+            dgcnn_input_dim = {'MUTAG': [32, 32, 32, 1], 'NCI1': [32, 32, 32, 1], 'ENZYMES': [32, 32, 32, 1],
+                               'Graph-SST5': [32, 32, 32, 1], 'PROTEINS': [32, 32, 32, 1],
+                               'IsCyclic': [32, 32, 32, 1]}
             GNN_layers = dgcnn_input_dim[self.dataset_name]
             feature_width = sum(GNN_layers)
             conv1d_kernels=[feature_width, 5]
