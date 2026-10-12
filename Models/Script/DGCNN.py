@@ -27,15 +27,31 @@ class DGCNN_Model(nn.Module):
     '''
         DGCNN Layers using Sparse Adjacency Matrix Multiplication
     '''
-    def __init__(self, GNN_layers, mlp_act_fun, dgcnn_act_fun, mlp_dropout_rate, Weight_Initializer, Bias, num_classes, dgcnn_k,
+    def __init__(self, GNN_layers, mlp_act_fun, dgcnn_act_fun, mlp_dropout_rate, Weight_Initializer, bias, num_classes, dgcnn_k,
                  node_feat_size, hid_channels, conv1d_kernels, ffn_layer_size, strides):
 
         super(DGCNN_Model, self).__init__()
+        if not GNN_layers or any(not isinstance(dim, int) or isinstance(dim, bool) or dim <= 0 for dim in GNN_layers):
+            raise ValueError("GNN_layers must contain positive integer widths.")
+        for name, value in (
+        ("node_feat_size", node_feat_size), ("num_classes", num_classes), ("dgcnn_k", dgcnn_k), ("ffn_layer_size", ffn_layer_size),):
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer.")
+        if dgcnn_k < 10:
+            raise ValueError("The updated Conv1d architecture requires k >= 10.")
+        if len(hid_channels) != 2 or any(not isinstance(dim, int) or isinstance(dim, bool) or dim <= 0 for dim in hid_channels):
+            raise ValueError("hid_channels must contain two positive integers.")
+        if dgcnn_act_fun not in ("ReLu", "eLu", "tanh"):
+            raise ValueError(f"Unsupported graph activation: {dgcnn_act_fun}")
+        if mlp_act_fun != "ReLu":
+            raise ValueError(f"Unsupported MLP activation: {mlp_act_fun}")
+        if not 0 <= mlp_dropout_rate <= 1:
+            raise ValueError("Dropout rate must be between 0 and 1.")
         self.GNN_layers = GNN_layers
-        self.last_gnn_layer_dim = GNN_layers[-1]
+        self.last_gnn_layer_dim = sum(GNN_layers)
         self.num_GNN_layers = len(GNN_layers)
         self.mlp_dropout_rate = mlp_dropout_rate
-        self.Bias = Bias
+        self.bias = bias
         self.Weight_Initializer = Weight_Initializer
         self.dgcnn_k = dgcnn_k
         self.node_feat_size = node_feat_size
@@ -47,7 +63,7 @@ class DGCNN_Model(nn.Module):
 
         self.gnn_layers = dgcnn_gnn_layers.DGCNN_GNN_Layers(GNN_layers=self.GNN_layers,
                                                             node_feat_size=self.node_feat_size,
-                                                            Bias=self.Bias, dgcnn_act_fun=dgcnn_act_fun)
+                                                            bias=self.bias, dgcnn_act_fun=dgcnn_act_fun)
 
         self.sort_pool = sortpooling_layer.SortPooling_for_BMM(self.dgcnn_k)
 
@@ -55,7 +71,7 @@ class DGCNN_Model(nn.Module):
                                                 mlp_act_fun=mlp_act_fun, dropout_rate=self.mlp_dropout_rate,
                                                 hid_channels=self.hid_channels, conv1d_kernels=self.conv1d_kernels,
                                                 dgcnn_k=self.dgcnn_k, ffn_layer_size=self.ffn_layer_size,
-                                                Bias=self.Bias, strides=self.strides)
+                                                bias=self.bias, strides=self.strides)
         if dgcnn_act_fun == 'ReLu':
             self.dgcnn_act_fun = F.relu
             # print('ReLu is Selected.')
@@ -66,101 +82,119 @@ class DGCNN_Model(nn.Module):
             self.dgcnn_act_fun = torch.tanh
             # print('tanh is Selected.')
 
-
-
         mean = 0
         std = 0.1
-        self.initialize_weights(Weight_Initializer, Bias, mean, std)
+        self.initialize_weights(Weight_Initializer, bias, mean, std)
 
+    def initialize_weights(self, Weight_Initializer, bias, mean=0.0, std=0.1):
+        # 1: Xavier Normal
+        # 2: Kaiming Normal
+        # 3: Normal(mean, std)
+        if Weight_Initializer not in (1, 2, 3):
+            raise ValueError("Weight_Initializer must be 1 (Xavier), 2 (Kaiming), or 3 (Normal).")
 
-    def initialize_weights(model, Weight_Initializer, Bias, mean, std):
-        # 1. Xavier Normal_.  2. Kaiming Normal_.  3. Uniform (0,0.1std)
-        if Weight_Initializer == 1:                                             #.      1. Xavier Normal_.
-            for i,layers in enumerate(model.children()):
-                if isinstance(layers, dgcnn_gnn_layers.DGCNN_GNN_Layers):
-                    for j, layer in enumerate(layers.modules()):
-                        if isinstance(layer, nn.Linear):
-                            torch.nn.init.xavier_normal_(layer.weight.data)
-                            if Bias:
-                                layer.bias.data.zero_()
-                        if isinstance(layer, dgcnn_layer.DGCNN_Layer):
-                            torch.nn.init.xavier_normal_(layer.conv_params.weight)
-                            if Bias:
-                                layer.conv_params.bias.data.zero_()
-                        else:
-                            pass
-                if isinstance(layers, torch.nn.Linear):
-                    torch.nn.init.xavier_normal_(layers.weight)
-                    if Bias:
-                        layers.bias.data.zero_()
-                if isinstance(layers, (dgcnn_mlp.DGCNN_MLP)):
-                    torch.nn.init.xavier_normal_(layers.conv1d_1.weight)
-                    torch.nn.init.xavier_normal_(layers.conv1d_2.weight)
-                    torch.nn.init.xavier_normal_(layers.linear1.weight)
-                    torch.nn.init.xavier_normal_(layers.linear2.weight)
+        with torch.no_grad():
+            for module in self.modules():
+                if not isinstance(module, (nn.Linear, nn.Conv1d)):
+                    continue
+                if Weight_Initializer == 1:
+                    nn.init.xavier_normal_(module.weight)
+                elif Weight_Initializer == 2:
+                    nn.init.kaiming_normal_(module.weight, mode="fan_in", nonlinearity="relu",)
+                else:
+                    nn.init.normal_(module.weight, mean=mean, std=std,)
 
-                elif isinstance(layers, (global_avg_pooling.GlobalAveragePooling)):
-                    pass
-                elif isinstance(layers, (identical_pooling.IdenticalPooling)):
-                    pass
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
-        if Weight_Initializer == 2:                                             #.      2. Kaiming Normal_.
-            for i,layers in enumerate(model.children()):
-                if isinstance(layers, dgcnn_gnn_layers.DGCNN_GNN_Layers):
-                    for j, layer in enumerate(layers.modules()):
-                        if isinstance(layer, nn.Linear):
-                            torch.nn.init.kaiming_normal_(layer.weight.data)
-                            if Bias:
-                                layer.bias.data.zero_()
-                        if isinstance(layer, dgcnn_layer.DGCNN_Layer):
-                            torch.nn.init.kaiming_normal_(layer.conv_params.weight)
-                            if Bias:
-                                layer.conv_params.bias.data.zero_()
-                        else:
-                            pass
-                if isinstance(layers, torch.nn.Linear):
-                    torch.nn.init.kaiming_normal_(layers.weight)
-                    if Bias:
-                        layers.bias.data.zero_()
-                if isinstance(layers, (dgcnn_mlp.DGCNN_MLP)):
-                    torch.nn.init.kaiming_normal_(layers.conv1d_1.weight)
-                    torch.nn.init.kaiming_normal_(layers.conv1d_2.weight)
-                    torch.nn.init.kaiming_normal_(layers.linear1.weight)
-                    torch.nn.init.kaiming_normal_(layers.linear2.weight)
-
-                elif isinstance(layers, (global_avg_pooling.GlobalAveragePooling)):
-                    pass
-                elif isinstance(layers, (identical_pooling.IdenticalPooling)):
-                    pass
-
-        if Weight_Initializer == 3:                                             #.      3. Uniform (0,0.1std)
-            for i,layers in enumerate(model.children()):
-                if isinstance(layers, dgcnn_gnn_layers.DGCNN_GNN_Layers):
-                    for j, layer in enumerate(layers.modules()):
-                        #print("here2")
-                        if isinstance(layer, nn.Linear):
-                            torch.nn.init.normal_(layer.weight.data, mean, std)
-                            if Bias:
-                                layer.bias.data.zero_()
-                        if isinstance(layer, dgcnn_layer.DGCNN_Layer):
-                            torch.nn.init.normal_(layer.conv_params.weight, mean, std)
-                            if Bias:
-                                layer.conv_params.bias.data.zero_()
-                        else:
-                            pass
-                if isinstance(layers, torch.nn.Linear):
-                    torch.nn.init.normal_(layers.weight, mean, std)
-                    if Bias:
-                        layers.bias.data.zero_()
-                if isinstance(layers, (dgcnn_mlp.DGCNN_MLP)):
-                    torch.nn.init.normal_(layers.conv1d_1.weight, mean, std)
-                    torch.nn.init.normal_(layers.conv1d_2.weight, mean, std)
-                    torch.nn.init.normal_(layers.linear1.weight, mean, std)
-                    torch.nn.init.normal_(layers.linear2.weight, mean, std)
-                elif isinstance(layers, (global_avg_pooling.GlobalAveragePooling)):
-                    pass
-                elif isinstance(layers, (identical_pooling.IdenticalPooling)):
-                    pass
+    # def initialize_weights(model, Weight_Initializer, bias, mean, std):
+    #     # 1. Xavier Normal_.  2. Kaiming Normal_.  3. Uniform (0,0.1std)
+    #     if Weight_Initializer == 1:                                             #.      1. Xavier Normal_.
+    #         for i,layers in enumerate(model.children()):
+    #             if isinstance(layers, dgcnn_gnn_layers.DGCNN_GNN_Layers):
+    #                 for j, layer in enumerate(layers.modules()):
+    #                     if isinstance(layer, nn.Linear):
+    #                         torch.nn.init.xavier_normal_(layer.weight.data)
+    #                         if bias:
+    #                             layer.bias.data.zero_()
+    #                     if isinstance(layer, dgcnn_layer.DGCNN_Layer):
+    #                         torch.nn.init.xavier_normal_(layer.conv_params.weight)
+    #                         if bias:
+    #                             layer.conv_params.bias.data.zero_()
+    #                     else:
+    #                         pass
+    #             if isinstance(layers, torch.nn.Linear):
+    #                 torch.nn.init.xavier_normal_(layers.weight)
+    #                 if bias:
+    #                     layers.bias.data.zero_()
+    #             if isinstance(layers, (dgcnn_mlp.DGCNN_MLP)):
+    #                 torch.nn.init.xavier_normal_(layers.conv1d_1.weight)
+    #                 torch.nn.init.xavier_normal_(layers.conv1d_2.weight)
+    #                 torch.nn.init.xavier_normal_(layers.linear1.weight)
+    #                 torch.nn.init.xavier_normal_(layers.linear2.weight)
+    #
+    #             elif isinstance(layers, (global_avg_pooling.GlobalAveragePooling)):
+    #                 pass
+    #             elif isinstance(layers, (identical_pooling.IdenticalPooling)):
+    #                 pass
+    #
+    #     if Weight_Initializer == 2:                                             #.      2. Kaiming Normal_.
+    #         for i,layers in enumerate(model.children()):
+    #             if isinstance(layers, dgcnn_gnn_layers.DGCNN_GNN_Layers):
+    #                 for j, layer in enumerate(layers.modules()):
+    #                     if isinstance(layer, nn.Linear):
+    #                         torch.nn.init.kaiming_normal_(layer.weight.data)
+    #                         if bias:
+    #                             layer.bias.data.zero_()
+    #                     if isinstance(layer, dgcnn_layer.DGCNN_Layer):
+    #                         torch.nn.init.kaiming_normal_(layer.conv_params.weight)
+    #                         if bias:
+    #                             layer.conv_params.bias.data.zero_()
+    #                     else:
+    #                         pass
+    #             if isinstance(layers, torch.nn.Linear):
+    #                 torch.nn.init.kaiming_normal_(layers.weight)
+    #                 if bias:
+    #                     layers.bias.data.zero_()
+    #             if isinstance(layers, (dgcnn_mlp.DGCNN_MLP)):
+    #                 torch.nn.init.kaiming_normal_(layers.conv1d_1.weight)
+    #                 torch.nn.init.kaiming_normal_(layers.conv1d_2.weight)
+    #                 torch.nn.init.kaiming_normal_(layers.linear1.weight)
+    #                 torch.nn.init.kaiming_normal_(layers.linear2.weight)
+    #
+    #             elif isinstance(layers, (global_avg_pooling.GlobalAveragePooling)):
+    #                 pass
+    #             elif isinstance(layers, (identical_pooling.IdenticalPooling)):
+    #                 pass
+    #
+    #     if Weight_Initializer == 3:                                             #.      3. Uniform (0,0.1std)
+    #         for i,layers in enumerate(model.children()):
+    #             if isinstance(layers, dgcnn_gnn_layers.DGCNN_GNN_Layers):
+    #                 for j, layer in enumerate(layers.modules()):
+    #                     #print("here2")
+    #                     if isinstance(layer, nn.Linear):
+    #                         torch.nn.init.normal_(layer.weight.data, mean, std)
+    #                         if bias:
+    #                             layer.bias.data.zero_()
+    #                     if isinstance(layer, dgcnn_layer.DGCNN_Layer):
+    #                         torch.nn.init.normal_(layer.conv_params.weight, mean, std)
+    #                         if bias:
+    #                             layer.conv_params.bias.data.zero_()
+    #                     else:
+    #                         pass
+    #             if isinstance(layers, torch.nn.Linear):
+    #                 torch.nn.init.normal_(layers.weight, mean, std)
+    #                 if bias:
+    #                     layers.bias.data.zero_()
+    #             if isinstance(layers, (dgcnn_mlp.DGCNN_MLP)):
+    #                 torch.nn.init.normal_(layers.conv1d_1.weight, mean, std)
+    #                 torch.nn.init.normal_(layers.conv1d_2.weight, mean, std)
+    #                 torch.nn.init.normal_(layers.linear1.weight, mean, std)
+    #                 torch.nn.init.normal_(layers.linear2.weight, mean, std)
+    #             elif isinstance(layers, (global_avg_pooling.GlobalAveragePooling)):
+    #                 pass
+    #             elif isinstance(layers, (identical_pooling.IdenticalPooling)):
+    #                 pass
 
 
     def forward(self, graph, edge_mask):
@@ -175,7 +209,7 @@ class DGCNN_Model(nn.Module):
         if Output_of_GNN_Layers.requires_grad:
             Output_of_GNN_Layers.retain_grad()
 
-        sortpooled_embedings = self.sort_pool(output_of_dgcnn_layer=Output_of_GNN_Layers)
+        sortpooled_embedings = self.sort_pool(output_of_dgcnn_layer=Output_of_GNN_Layers, graph_sizes=graph_sizes,)
 
         if sortpooled_embedings.requires_grad:
             sortpooled_embedings.retain_grad()

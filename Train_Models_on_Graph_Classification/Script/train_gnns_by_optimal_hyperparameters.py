@@ -128,14 +128,14 @@ class Train_GNNs_by_Optimal_Hyperparameters:
             dgcnn_input_dim = {'MUTAG': [32, 32, 32, 32], 'NCI1': [32, 32, 32, 32], 'ENZYMES': [32, 32, 32, 32],
                                'Graph-SST5': [64, 64, 64, 64], 'PROTEINS': [32, 32, 32, 32],
                                'IsCyclic': [32, 32, 32, 32]}
-
-            self.GNN_Model = dgcnn_model.DGCNN_Model(GNN_layers=dgcnn_input_dim[self.dataset_name], Bias=self.bias,
-                                                     num_classes=self.num_classes, mlp_act_fun="ReLu",
-                                                     dgcnn_act_fun="tanh", Weight_Initializer=self.weight_initializer,
-                                                     mlp_dropout_rate=dropout_rate, dgcnn_k=k_dgcnn[self.dataset_name],
-                                                     node_feat_size=node_feat_size, hid_channels=[16, 32],
-                                                     conv1d_kernels=[2, 5], ffn_layer_size=128,
-                                                     strides=[2, 1]).to(self.device)
+            GNN_layers = dgcnn_input_dim[self.dataset_name]
+            feature_width = sum(GNN_layers)
+            conv1d_kernels=[feature_width, 5]
+            strides=[feature_width, 1]
+            self.GNN_Model = dgcnn_model.DGCNN_Model(GNN_layers=GNN_layers, bias=self.bias, num_classes=self.num_classes, mlp_act_fun="ReLu",
+                                                     dgcnn_act_fun="tanh", Weight_Initializer=self.weight_initializer, mlp_dropout_rate=dropout_rate,
+                                                     dgcnn_k=k_dgcnn[self.dataset_name], node_feat_size=node_feat_size, hid_channels=[16, 32],
+                                                     conv1d_kernels=conv1d_kernels, ffn_layer_size=128, strides=strides).to(self.device)
         ###################################################################################################               DIFFPOOL
         if self.GNN_Model_Name == "DIFFPOOL_Model":
             sys.path.insert(0, default_path+'/Models/Script')

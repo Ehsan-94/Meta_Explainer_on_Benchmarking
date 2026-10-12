@@ -248,11 +248,15 @@ class GNN_Models_HyperParameter_Optimization:
             dgcnn_input_dim = {'MUTAG': [32, 32, 32, 32], 'NCI1': [32, 32, 32, 32], 'ENZYMES': [32, 32, 32, 32],
                                'Graph-SST5': [64, 64, 64, 64], 'PROTEINS': [32, 32, 32, 32],
                                'IsCyclic': [32, 32, 32, 32]}
+            GNN_layers = dgcnn_input_dim[self.dataset_name]
+            feature_width = sum(GNN_layers)
+            conv1d_kernels=[feature_width, 5]
+            strides=[feature_width, 1]
             for i in range(self.num_folds):
-                Models[i] = dgcnn_model.DGCNN_Model(GNN_layers=dgcnn_input_dim[self.dataset_name], bias=bias, num_classes=self.num_classes,
-                                                    mlp_act_fun="ReLu", dgcnn_act_fun="tanh", Weight_Initializer=winit, mlp_dropout_rate=dropout_rate,
+                Models[i] = dgcnn_model.DGCNN_Model(GNN_layers=GNN_layers, bias=bias, num_classes=self.num_classes, mlp_act_fun="ReLu",
+                                                    dgcnn_act_fun="tanh", Weight_Initializer=winit, mlp_dropout_rate=dropout_rate,
                                                     dgcnn_k=k_dgcnn[self.dataset_name], node_feat_size=node_feat_size, hid_channels=[16, 32],
-                                                    conv1d_kernels=[2, 5], ffn_layer_size=128, strides=[2, 1]).to(self.device)
+                                                    conv1d_kernels=conv1d_kernels, ffn_layer_size=128, strides=strides,).to(self.device)
 
         elif self.GNN_Model_name == "DIFFPOOL_Model":
             from Meta_Explainer_on_Benchmarking.Models.Script.Layers import Batched_GraphSage_Layer as batched_graphsage_layer

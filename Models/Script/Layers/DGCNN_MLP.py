@@ -6,34 +6,46 @@ import torch.nn.functional as F
 
 class DGCNN_MLP(nn.Module):
     def __init__(self, num_class, last_gnn_layer_dim, mlp_act_fun, dropout_rate, hid_channels, conv1d_kernels, dgcnn_k,
-                 ffn_layer_size, Bias, strides):
-
+                 ffn_layer_size, bias, strides):
         super(DGCNN_MLP, self).__init__()
+        for name, values in (("conv1d_kernels", conv1d_kernels), ("strides", strides),):
+            if len(values) != 2 or any(not isinstance(value, int) or isinstance(value, bool) or value <= 0 for value in values):
+                raise ValueError(f"{name} must contain two positive integers.")
+        if list(conv1d_kernels) != [last_gnn_layer_dim, 5]:
+            raise ValueError("Expected kernels [concatenated_feature_width, 5].")
+        if list(strides) != [last_gnn_layer_dim, 1]:
+            raise ValueError("Expected strides [concatenated_feature_width, 1].")
+        self.conv1d_kernels = list(conv1d_kernels)
+        self.strides = list(strides)
         self.dgcnn_k = dgcnn_k
         self.last_gnn_layer_dim = last_gnn_layer_dim
         self.hid_channels = hid_channels
-        self.conv1d_kernels = conv1d_kernels
         self.padding = 0
         self.ffn_layer_size = ffn_layer_size
         self.num_class = num_class
-        self.Bias = Bias
-        self.strides = strides
+        self.bias = bias
 
         self.conv1d_1 = nn.Conv1d(in_channels=1, out_channels=self.hid_channels[0], kernel_size=self.conv1d_kernels[0],
-                                  stride=self.strides[0], padding=self.padding, bias=self.Bias)
+                                  stride=self.strides[0], padding=self.padding, bias=self.bias)
 
         self.maxpool1d = nn.MaxPool1d(kernel_size=2, stride=2)
 
         self.conv1d_2 = nn.Conv1d(in_channels=self.hid_channels[0], out_channels=self.hid_channels[1],
-                                  kernel_size=self.conv1d_kernels[1], stride=self.strides[1], bias=self.Bias)
+                                  kernel_size=self.conv1d_kernels[1], stride=self.strides[1], bias=self.bias)
 
-        dim_conv1_out = int((self.dgcnn_k*self.last_gnn_layer_dim + 2*self.padding -2)/(self.strides[0]) + 1) # self.node_feat_size should change to the last GNN layer dimension
-        dim_conv1_out = dim_conv1_out/2
+        input_length = self.dgcnn_k * self.last_gnn_layer_dim
+        conv1_length = (input_length + 2 * self.padding - self.conv1d_kernels[0]) // self.strides[0] + 1
+        if conv1_length < 2:
+            raise ValueError("First convolution output is too short for max pooling.")
 
-        dim_conv2_out = int((dim_conv1_out - self.conv1d_kernels[1])/(self.strides[1])+1)
+        pool_length = (conv1_length - 2) // 2 + 1
+        conv2_length = (pool_length - self.conv1d_kernels[1]) // self.strides[1] + 1
 
-        self.linear1 = nn.Linear(self.hid_channels[1]*dim_conv2_out, self.ffn_layer_size, bias=self.Bias)
-        self.linear2 = nn.Linear(self.ffn_layer_size, self.num_class, bias=self.Bias)
+        if conv2_length <= 0:
+            raise ValueError(f"dgcnn_k={self.dgcnn_k} is too small. " "This architecture requires k >= 10.")
+
+        self.linear1 = nn.Linear(self.hid_channels[1] * conv2_length, self.ffn_layer_size, bias=self.bias,)
+        self.linear2 = nn.Linear(self.ffn_layer_size, self.num_class, bias=self.bias)
 
         if mlp_act_fun == 'ReLu':
             self.mlp_act_fun = F.relu
