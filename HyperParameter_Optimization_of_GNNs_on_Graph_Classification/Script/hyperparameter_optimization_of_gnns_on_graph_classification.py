@@ -99,6 +99,8 @@ class GNN_Models_HyperParameter_Optimization:
         Weight_Initializer = [1, 3.999999] # 1. Xavier Uniform.  2. Kaiming.  3. uniform 0,0.1std
         self.weight_decay = weight_decay
 
+        self.diffpool_link_weight = 1.0
+        self.diffpool_entropy_weight = 1.0
         self.utility = UtilityFunction(kind="ucb", kappa=1.96, xi=0.01)
         param_grid = dict(LR=LR, GNN_Epochs=GNN_Epochs, DropOut_Rate=DropOut_Rate, Bias=Bias, Batch_count_by_16=Batch,
                           Loss_Function=Loss_Function, Weight_Initializer=Weight_Initializer)
@@ -270,10 +272,10 @@ class GNN_Models_HyperParameter_Optimization:
                 Models[i] = diffpool_model.DIFFPOOL_Model(embedding_input_dim=node_feat_size, embedding_num_block_layers=1, embedding_hid_dim=64,
                                                           new_feature_size=64, assignment_input_dim=node_feat_size, assignment_num_block_layers=1,
                                                           assignment_hid_dim=64, max_number_of_nodes=256, prediction_hid_layers=[50],
-                                                          concat_neighborhood=False, num_classes=self.num_classes, Weight_Initializer=winit,
+                                                          concat_neighborhood=False, num_classes=self.num_classes, weight_initializer_index=winit,
                                                           bias=bias, act_fun=act_fun, dropout_rate=dropout_rate, normalize_graphsage=False,
                                                           aggregation="mean", concat_diffpools_outputs=True, num_pooling=1,
-                                                          pooling="mean").to(self.device)
+                                                          pooling="mean", use_batch_norm=False, pooling_ratio=None).to(self.device)
 
         elif self.GNN_Model_name == "GIN_Model":
             from Meta_Explainer_on_Benchmarking.Models.Script.Layers import GIN_MLP_Layers as gin_mlp_layers
@@ -409,9 +411,10 @@ class GNN_Models_HyperParameter_Optimization:
             for graph in Data:
                 graph = graph.to(self.device)
                 Optimizer.zero_grad(set_to_none=True)
-                concatination_list_of_poolings, prediction_output_without_softmax, prediction_output = GNN_Model(graph, None)
-                batch_loss = self.loss_calculations(prediction_output_without_softmax, prediction_output, graph.y,
-                                                    loss_function_index, )
+                (concatination_list_of_poolings, prediction_output_without_softmax, prediction_output,
+                 auxiliary,) = GNN_Model(graph, edge_mask=None, return_aux_losses=True, )
+                classification_loss = self.loss_calculations(prediction_output_without_softmax, prediction_output, graph.y, loss_function_index,)
+                batch_loss = (classification_loss + self.diffpool_link_weight * auxiliary["link_loss"] + self.diffpool_entropy_weight * auxiliary["entropy_loss"])
                 GNN_Model_loss_batch.append(batch_loss.detach())
                 labels = graph.y.reshape(-1).long()
                 predicted_labels = prediction_output.detach().argmax(dim=1)
@@ -509,7 +512,7 @@ class GNN_Models_HyperParameter_Optimization:
                 batch_of_graphs = batch_of_graphs.to(self.device)
 
                 (concatination_list_of_poolings, prediction_output_without_soft, prediction_output,) = GNN_Model(
-                    batch_of_graphs, None)
+                    batch_of_graphs, edge_mask=None, return_aux_losses=False,)
 
                 GNN_Outputs.append(prediction_output.detach().cpu())
                 Real_Labels.append(batch_of_graphs.y.reshape(-1).long().cpu())

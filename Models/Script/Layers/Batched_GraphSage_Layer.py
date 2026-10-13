@@ -13,45 +13,56 @@ sys.path.insert(0,py_path)
 from torch_geometric.typing import Adj, OptPairTensor, Size, SparseTensor
 import torch
 import torch.nn as nn
-import matrix_util as Mat_Util
 import torch.nn.functional as F
+
+
 class GNN_Batched_GraphSage_Layer(nn.Module):
-    '''
-        #    A single GraphSage Layer: Graph Sampling and Aggregate
-    '''
-    def __init__(self, input_dim, output_dim, Bias, normalize_graphsage, dropout, aggregation, concat):
+    def __init__(self, input_dim, output_dim, bias, normalize_graphsage, dropout, aggregation, concat, use_batch_norm=False):
         super(GNN_Batched_GraphSage_Layer, self).__init__()
 
         self.input_dim = input_dim
         self.output_dim = output_dim
-        self.Bias = Bias
-        self.dropout = dropout
+        self.bias = bias
+        if not 0 <= dropout <= 1:
+            raise ValueError("Dropout probability must be between 0 and 1.")
+        self.dropout = float(dropout)
         self.normalize_graphsage = normalize_graphsage
         self.aggregation = aggregation
         self.concat = concat
+        self.use_batch_norm=use_batch_norm
 
         if self.concat:
-            self.learnable_weights = nn.Linear(self.input_dim*2, self.output_dim, bias=self.Bias)
+            self.learnable_weights = nn.Linear(self.input_dim*2, self.output_dim, bias=self.bias)
         else:
-            self.learnable_weights = nn.Linear(self.input_dim, self.output_dim, bias=self.Bias)
-
+            self.learnable_weights = nn.Linear(self.input_dim, self.output_dim, bias=self.bias)
+        self.batch_norm = (nn.BatchNorm1d(output_dim) if use_batch_norm else None)
         self.normalize = F.normalize
 
-
-    def forward(self, new_features, tilda_adjacency_matrix):
-
-        new_features = new_features.to(dtype=torch.float32)
-        tilda_adjacency_matrix = tilda_adjacency_matrix.to(dtype=torch.float32)
-
-        if self.aggregation == 'mean':
-            adjacency_sum = tilda_adjacency_matrix.sum(-2, keepdim=False).unsqueeze(dim=-2)
-            adjacency_sum = adjacency_sum.clamp_min(1e-12)
-            tilda_adjacency_matrix = (tilda_adjacency_matrix / adjacency_sum)
-        aggregated_neghborhood = torch.bmm(tilda_adjacency_matrix, new_features)
+    def forward(self, new_features, tilda_adjacency_matrix, node_mask):
+        new_features = F.dropout(new_features, p=self.dropout, training=self.training,)
+        if self.aggregation == "mean":
+            degree = tilda_adjacency_matrix.sum(dim=-1, keepdim=True,)
+            aggregation_matrix = (tilda_adjacency_matrix / degree.clamp_min(1e-12))
+        elif self.aggregation == "sum":
+            aggregation_matrix = tilda_adjacency_matrix
+        else:
+            raise ValueError(f"Unsupported aggregation: {self.aggregation}")
+        aggregated_neghborhood = torch.bmm(aggregation_matrix, new_features,)
         if self.concat:
-            aggregated_neghborhood = torch.cat((aggregated_neghborhood, new_features),2)
+            aggregated_neghborhood = torch.cat((aggregated_neghborhood, new_features),dim=-1,)
         node_linear = self.learnable_weights(aggregated_neghborhood)
+        if node_mask is None:
+            node_mask = torch.ones(node_linear.shape[:2], dtype=torch.bool, device=node_linear.device,)
+        if self.batch_norm is not None:
+            real_values = node_linear[node_mask]
+            if real_values.size(0) == 0:
+                raise ValueError("Batch contains no valid nodes.")
+            if self.training and real_values.size(0) < 2:
+                raise ValueError("Training BatchNorm requires at least two valid nodes.")
+            normalized_values = self.batch_norm(real_values)
+            node_linear = torch.zeros_like(node_linear).masked_scatter(node_mask.unsqueeze(-1).expand_as(node_linear),normalized_values.reshape(-1),)
+        node_linear = node_linear.masked_fill(~node_mask.unsqueeze(-1), 0)
         if self.normalize_graphsage:
-            node_linear = self.normalize(node_linear, p=2, dim=2)
+            node_linear = self.normalize(node_linear, p=2, dim=-1,)
 
         return node_linear

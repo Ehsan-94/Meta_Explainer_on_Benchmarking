@@ -91,6 +91,9 @@ class Train_GNNs_by_Optimal_Hyperparameters:
         self.GNN_Model_training_Acc_per_epoch = []
         self.GNN_Model_training_time_per_epoch = []
 
+        self.diffpool_link_weight = 1.0
+        self.diffpool_entropy_weight = 1.0
+
         self.train_dataloaded, self.test_dataloaded = self.my_dataset()
 
         sys.path.insert(0, self.default_path+'/Models/Script/Layers')
@@ -149,7 +152,7 @@ class Train_GNNs_by_Optimal_Hyperparameters:
                                                            assignment_num_block_layers=1, assignment_hid_dim=64,
                                                            max_number_of_nodes=256, prediction_hid_layers=[50],
                                                            concat_neighborhood=False, num_classes=self.num_classes,
-                                                           Weight_Initializer=self.weight_initializer, Bias=self.bias,
+                                                           weight_initializer_index=self.weight_initializer, bias=self.bias,
                                                            act_fun=act_fun, dropout_rate=dropout_rate,
                                                            normalize_graphsage=False, aggregation="mean",
                                                            concat_diffpools_outputs=True,num_pooling=1,
@@ -282,11 +285,13 @@ class Train_GNNs_by_Optimal_Hyperparameters:
                 Pred_Labels.extend(softmaxed_h2.argmax(dim=1).detach().tolist())
 
             elif self.GNN_Model.__class__.__name__ == "DIFFPOOL_Model":
-                (concatination_list_of_poolings, prediction_output_before_soft, prediction_output) = self.GNN_Model(
-                    batch_of_graphs, None)
+                (concatination_list_of_poolings, prediction_output_before_soft, prediction_output,
+                 auxiliary,) = self.GNN_Model(batch_of_graphs, edge_mask=None, return_aux_losses=True, )
+                classification_loss = self.loss_calculations(class_scores=prediction_output_before_soft, probabilities=prediction_output,
+                                                             labels=batch_of_graphs.y, )
+                batch_loss = (classification_loss + self.diffpool_link_weight * auxiliary["link_loss"] + self.diffpool_entropy_weight * auxiliary[
+                    "entropy_loss"])
                 Pred_Labels.extend(prediction_output.argmax(dim=1).detach().tolist())
-                batch_loss = self.loss_calculations(class_scores=prediction_output_before_soft,
-                                                    probabilities=prediction_output, labels=batch_of_graphs.y, )
 
             elif self.GNN_Model.__class__.__name__ == "GIN_Model":
                 (mlps_output_embeds, mlp_outputs_globalSUMpooled, lin1_output, lin1_output_dropouted, lin2_output,
@@ -393,7 +398,8 @@ class Train_GNNs_by_Optimal_Hyperparameters:
 
             for batch_of_graphs in self.test_dataset:
                 batch_of_graphs = batch_of_graphs.to(self.device)
-                concatination_list_of_poolings, prediction_output_without_soft, prediction_output = self.GNN_Model(batch_of_graphs, None)
+                concatination_list_of_poolings, prediction_output_without_soft, prediction_output = self.GNN_Model(batch_of_graphs, edge_mask=None,
+                                                                                                                   return_aux_losses=False)
                 GNN_Model_test_pred = prediction_output.argmax(dim=1)
                 GNN_Preds.extend(GNN_Model_test_pred.tolist())
                 Real_Labels.extend(batch_of_graphs.y.tolist())
