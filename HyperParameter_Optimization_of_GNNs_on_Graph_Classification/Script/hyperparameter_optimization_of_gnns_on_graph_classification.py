@@ -256,7 +256,7 @@ class GNN_Models_HyperParameter_Optimization:
             strides=[feature_width, 1]
             for i in range(self.num_folds):
                 Models[i] = dgcnn_model.DGCNN_Model(GNN_layers=GNN_layers, bias=bias, num_classes=self.num_classes, mlp_act_fun="ReLu",
-                                                    dgcnn_act_fun="tanh", Weight_Initializer=winit, mlp_dropout_rate=dropout_rate,
+                                                    dgcnn_act_fun="tanh", weight_initializer_index=winit, mlp_dropout_rate=dropout_rate,
                                                     dgcnn_k=k_dgcnn[self.dataset_name], node_feat_size=node_feat_size, hid_channels=[16, 32],
                                                     conv1d_kernels=conv1d_kernels, ffn_layer_size=128, strides=strides,).to(self.device)
 
@@ -288,7 +288,8 @@ class GNN_Models_HyperParameter_Optimization:
             for i in range(self.num_folds):
                 Models[i] = gin_model.GIN_Model(num_mlp_layers=4, bias=bias, num_slp_layers=2, mlp_act_fun=act_fun, mlp_input_dim=node_feat_size,
                                                 mlp_hid_dim=gin_input_dim[self.dataset_name], mlp_output_dim=self.num_classes,
-                                                dropout_rate=dropout_rate, joint_embeddings=False, Weight_Initializer=winit).to(self.device)
+                                                dropout_rate=dropout_rate, joint_embeddings=True, weight_initializer_index=winit,
+                                                train_eps=True, ).to(self.device)
 
         os.chdir(self.default_path)
 
@@ -318,29 +319,29 @@ class GNN_Models_HyperParameter_Optimization:
         GNN_Model_training_loss_per_epoch = []
         GNN_Model_training_time_per_epoch = []
 
-        for epoch in range(gnn_epochs):
+        for gnn_epoch in range(gnn_epochs):
             starting_time = perf_counter()
             GNN_Model_training_loss, training_accuracy = self.train_step(gnn_model, optimizer, data, loss_function_index)
-            print(f"Epoch: {epoch + 1:03d}, "f"Hyperparameter Optimization of {self.GNN_Model_name}, "
+            print(f"Epoch: {gnn_epoch + 1:03d}, "f"Hyperparameter Optimization of {self.GNN_Model_name}, "
                   f"Loss: {GNN_Model_training_loss:.4f}, "f"Train Accuracy: {training_accuracy:.2%}")
             GNN_Model_training_loss_per_epoch.append(GNN_Model_training_loss)
             ending_time = perf_counter()
             GNN_Model_training_time_per_epoch.append(ending_time - starting_time)
 
-            if ((epoch + load_index + 1) % self.LOSS_Visualization_Parameter == 0 and epoch > 0):
-                self.visualize_losses(GNN_Model_training_loss_per_epoch, epoch + load_index + 1, fold_id, checkpoint_config,)
+            if ((gnn_epoch + load_index + 1) % self.LOSS_Visualization_Parameter == 0 and gnn_epoch > 0):
+                self.visualize_losses(GNN_Model_training_loss_per_epoch, gnn_epoch + load_index + 1, fold_id, checkpoint_config,)
 
-            if (epoch + load_index + 1) % self.Model_Saving_Cycle == 0 and epoch > 0:
+            if (gnn_epoch + load_index + 1) % self.Model_Saving_Cycle == 0 and gnn_epoch > 0:
                 config = checkpoint_config
                 config_name = self.configuration_name(config)
                 save_dir = os.path.join(self.default_path, self.Explainability_name + "_on_Graph_Classification", "Model", self.GNN_Model_name,)
                 os.makedirs(save_dir, exist_ok=True)
 
-                filename = (f"{self.dataset_name}_{config_name}_"f"fold{fold_id:02d}_epoch{(epoch + load_index + 1):04d}.pt")
+                filename = (f"{self.dataset_name}_{config_name}_"f"fold{fold_id:02d}_epoch{(gnn_epoch + load_index + 1):04d}.pt")
 
                 checkpoint_path = os.path.join(save_dir, filename)
 
-                saved_dict = {"configuration": dict(checkpoint_config), "fold_id": fold_id, "gnn_epochs": (epoch + load_index + 1),
+                saved_dict = {"configuration": dict(checkpoint_config), "fold_id": fold_id, "gnn_epochs": (gnn_epoch + load_index + 1),
                               "model_state_dict": gnn_model.state_dict(), "optimizer_state_dict": optimizer.state_dict(),
                               "loss": GNN_Model_training_loss_per_epoch}
 
@@ -354,8 +355,8 @@ class GNN_Models_HyperParameter_Optimization:
     def train_step(self, GNN_Model, Optimizer, Data, loss_function_index):
         correct_predictions = 0
         total_graphs = 0
+        total_loss = 0.0
         if self.GNN_Model_name == "GCN_plus_GAP_Model":
-            GNN_Model_loss_batch = []
             GNN_Model.train()
 
             for graph in Data:
@@ -363,24 +364,26 @@ class GNN_Models_HyperParameter_Optimization:
                 Optimizer.zero_grad(set_to_none=True)
                 Output_of_Hidden_Layers, pooling_layer_output, ffn_output, soft = GNN_Model(graph, None)
                 batch_loss = self.loss_calculations(ffn_output, soft, graph.y, loss_function_index)
-                GNN_Model_loss_batch.append(batch_loss.detach())
+                batch_graph_count = graph.y.reshape(-1).numel()
+                total_loss += batch_loss.detach().item() * batch_graph_count
                 labels = graph.y.reshape(-1).long()
                 predicted_labels = soft.detach().argmax(dim=1)
                 correct_predictions += (predicted_labels == labels).sum().item()
                 total_graphs += labels.numel()
+                if not torch.isfinite(batch_loss).item():
+                    raise RuntimeError(f"Nonfinite training loss for {self.GNN_Model_name}")
                 batch_loss.backward()
                 Optimizer.step()
 
             if total_graphs == 0:
                 raise ValueError("Training loader contains no graphs.")
 
-            epoch_loss = torch.stack(GNN_Model_loss_batch).mean()
+            epoch_loss = torch.tensor(total_loss / total_graphs, dtype=torch.float32,)
             training_accuracy = correct_predictions / total_graphs
 
             return epoch_loss, training_accuracy
 
         elif self.GNN_Model_name == "DGCNN_Model":
-            GNN_Model_loss_batch = []
             GNN_Model.train()
 
             for graph in Data:
@@ -388,24 +391,26 @@ class GNN_Models_HyperParameter_Optimization:
                 Optimizer.zero_grad(set_to_none=True)
                 final_GNN_layer_output, sortpooled_embedings, output_conv1d_1, maxpooled_output_conv1d_1, output_conv1d_2, to_dense, ffn_1, dropout_ffn_1, ffn_2, softmaxed_ffn_2 = GNN_Model(graph, None)
                 batch_loss = self.loss_calculations(ffn_2, softmaxed_ffn_2, graph.y, loss_function_index)
-                GNN_Model_loss_batch.append(batch_loss.detach())
+                batch_graph_count = graph.y.reshape(-1).numel()
+                total_loss += batch_loss.detach().item() * batch_graph_count
                 labels = graph.y.reshape(-1).long()
                 predicted_labels = softmaxed_ffn_2.detach().argmax(dim=1)
                 correct_predictions += (predicted_labels == labels).sum().item()
                 total_graphs += labels.numel()
+                if not torch.isfinite(batch_loss).item():
+                    raise RuntimeError(f"Nonfinite training loss for {self.GNN_Model_name}")
                 batch_loss.backward()
                 Optimizer.step()
 
             if total_graphs == 0:
                 raise ValueError("Training loader contains no graphs.")
 
-            epoch_loss = torch.stack(GNN_Model_loss_batch).mean()
+            epoch_loss = torch.tensor(total_loss / total_graphs, dtype=torch.float32,)
             training_accuracy = correct_predictions / total_graphs
 
             return epoch_loss, training_accuracy
 
         elif self.GNN_Model_name == "DIFFPOOL_Model":
-            GNN_Model_loss_batch = []
             GNN_Model.train()
 
             for graph in Data:
@@ -415,24 +420,26 @@ class GNN_Models_HyperParameter_Optimization:
                  auxiliary,) = GNN_Model(graph, edge_mask=None, return_aux_losses=True, )
                 classification_loss = self.loss_calculations(prediction_output_without_softmax, prediction_output, graph.y, loss_function_index,)
                 batch_loss = (classification_loss + self.diffpool_link_weight * auxiliary["link_loss"] + self.diffpool_entropy_weight * auxiliary["entropy_loss"])
-                GNN_Model_loss_batch.append(batch_loss.detach())
+                batch_graph_count = graph.y.reshape(-1).numel()
+                total_loss += batch_loss.detach().item() * batch_graph_count
                 labels = graph.y.reshape(-1).long()
                 predicted_labels = prediction_output.detach().argmax(dim=1)
                 correct_predictions += (predicted_labels == labels).sum().item()
                 total_graphs += labels.numel()
+                if not torch.isfinite(batch_loss).item():
+                    raise RuntimeError(f"Nonfinite training loss for {self.GNN_Model_name}")
                 batch_loss.backward()
                 Optimizer.step()
 
             if total_graphs == 0:
                 raise ValueError("Training loader contains no graphs.")
 
-            epoch_loss = torch.stack(GNN_Model_loss_batch).mean()
+            epoch_loss = torch.tensor(total_loss / total_graphs, dtype=torch.float32,)
             training_accuracy = correct_predictions / total_graphs
 
             return epoch_loss, training_accuracy
 
         elif self.GNN_Model_name == "GIN_Model":
-            GNN_Model_loss_batch = []
             GNN_Model.train()
 
             for graph in Data:
@@ -440,24 +447,27 @@ class GNN_Models_HyperParameter_Optimization:
                 Optimizer.zero_grad(set_to_none=True)
                 mlps_output_embeds, mlp_outputs_globalSUMpooled, lin1_output, lin1_output_dropouted, lin2_output, lin2_output_softmaxed = GNN_Model(graph, None)
                 batch_loss = self.loss_calculations(lin2_output, lin2_output_softmaxed, graph.y, loss_function_index)
-                GNN_Model_loss_batch.append(batch_loss.detach())
+                batch_graph_count = graph.y.reshape(-1).numel()
+                total_loss += batch_loss.detach().item() * batch_graph_count
                 labels = graph.y.reshape(-1).long()
                 predicted_labels = lin2_output_softmaxed.detach().argmax(dim=1)
                 correct_predictions += (predicted_labels == labels).sum().item()
                 total_graphs += labels.numel()
+                if not torch.isfinite(batch_loss).item():
+                    raise RuntimeError(f"Nonfinite training loss for {self.GNN_Model_name}")
                 batch_loss.backward()
                 Optimizer.step()
 
             if total_graphs == 0:
                 raise ValueError("Training loader contains no graphs.")
 
-            epoch_loss = torch.stack(GNN_Model_loss_batch).mean()
+            epoch_loss = torch.tensor(total_loss / total_graphs, dtype=torch.float32,)
             training_accuracy = correct_predictions / total_graphs
 
             return epoch_loss, training_accuracy
 
         else:
-            print("Model Name is not appropriate")
+            raise ValueError(f"Unsupported model: {self.GNN_Model_name}")
 
     def loss_calculations(self, class_scores, probabilities, labels, loss_function_index):
         labels = labels.reshape(-1).long()

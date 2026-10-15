@@ -27,7 +27,7 @@ class DGCNN_Model(nn.Module):
     '''
         DGCNN Layers using Sparse Adjacency Matrix Multiplication
     '''
-    def __init__(self, GNN_layers, mlp_act_fun, dgcnn_act_fun, mlp_dropout_rate, Weight_Initializer, bias, num_classes, dgcnn_k,
+    def __init__(self, GNN_layers, mlp_act_fun, dgcnn_act_fun, mlp_dropout_rate, weight_initializer_index, bias, num_classes, dgcnn_k,
                  node_feat_size, hid_channels, conv1d_kernels, ffn_layer_size, strides):
 
         super(DGCNN_Model, self).__init__()
@@ -52,7 +52,7 @@ class DGCNN_Model(nn.Module):
         self.num_GNN_layers = len(GNN_layers)
         self.mlp_dropout_rate = mlp_dropout_rate
         self.bias = bias
-        self.Weight_Initializer = Weight_Initializer
+        self.weight_initializer_index = weight_initializer_index
         self.dgcnn_k = dgcnn_k
         self.node_feat_size = node_feat_size
         self.num_classes = num_classes
@@ -84,22 +84,22 @@ class DGCNN_Model(nn.Module):
 
         mean = 0
         std = 0.1
-        self.initialize_weights(Weight_Initializer, bias, mean, std)
+        self.initialize_weights(weight_initializer_index, bias, mean, std)
 
-    def initialize_weights(self, Weight_Initializer, bias, mean=0.0, std=0.1):
+    def initialize_weights(self, weight_initializer_index, bias, mean=0.0, std=0.1):
         # 1: Xavier Normal
         # 2: Kaiming Normal
         # 3: Normal(mean, std)
-        if Weight_Initializer not in (1, 2, 3):
+        if weight_initializer_index not in (1, 2, 3):
             raise ValueError("Weight_Initializer must be 1 (Xavier), 2 (Kaiming), or 3 (Normal).")
 
         with torch.no_grad():
             for module in self.modules():
                 if not isinstance(module, (nn.Linear, nn.Conv1d)):
                     continue
-                if Weight_Initializer == 1:
+                if weight_initializer_index == 1:
                     nn.init.xavier_normal_(module.weight)
-                elif Weight_Initializer == 2:
+                elif weight_initializer_index == 2:
                     nn.init.kaiming_normal_(module.weight, mode="fan_in", nonlinearity="relu",)
                 else:
                     nn.init.normal_(module.weight, mean=mean, std=std,)
@@ -109,7 +109,7 @@ class DGCNN_Model(nn.Module):
 
     # def initialize_weights(model, Weight_Initializer, bias, mean, std):
     #     # 1. Xavier Normal_.  2. Kaiming Normal_.  3. Uniform (0,0.1std)
-    #     if Weight_Initializer == 1:                                             #.      1. Xavier Normal_.
+    #     if weight_initializer_index == 1:                                             #.      1. Xavier Normal_.
     #         for i,layers in enumerate(model.children()):
     #             if isinstance(layers, dgcnn_gnn_layers.DGCNN_GNN_Layers):
     #                 for j, layer in enumerate(layers.modules()):
@@ -138,7 +138,7 @@ class DGCNN_Model(nn.Module):
     #             elif isinstance(layers, (identical_pooling.IdenticalPooling)):
     #                 pass
     #
-    #     if Weight_Initializer == 2:                                             #.      2. Kaiming Normal_.
+    #     if weight_initializer_index == 2:                                             #.      2. Kaiming Normal_.
     #         for i,layers in enumerate(model.children()):
     #             if isinstance(layers, dgcnn_gnn_layers.DGCNN_GNN_Layers):
     #                 for j, layer in enumerate(layers.modules()):
@@ -167,7 +167,7 @@ class DGCNN_Model(nn.Module):
     #             elif isinstance(layers, (identical_pooling.IdenticalPooling)):
     #                 pass
     #
-    #     if Weight_Initializer == 3:                                             #.      3. Uniform (0,0.1std)
+    #     if weight_initializer_index == 3:                                             #.      3. Uniform (0,0.1std)
     #         for i,layers in enumerate(model.children()):
     #             if isinstance(layers, dgcnn_gnn_layers.DGCNN_GNN_Layers):
     #                 for j, layer in enumerate(layers.modules()):
