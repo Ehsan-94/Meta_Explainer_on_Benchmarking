@@ -734,7 +734,7 @@ class GNN_Models_HyperParameter_Optimization:
         plt.close()
 
 # RUN_DATASETS = ["MUTAG", "NCI1", "Graph-SST5", "ENZYMES", "PROTEINS", "IsCyclic", ]
-DataSet_name = "ENZYMES"
+DataSet_name = "MUTAG"
 original_directory = os.getcwd()
 
 try:
@@ -748,7 +748,7 @@ finally:
 
 #.  GNN_Models_Name = dict([(1, "GCN_plus_GAP"), (2, "DGCNN"), (3, "DIFFPOOL"), (4, "GIN")])
 
-hyp_opt_gnns = GNN_Models_HyperParameter_Optimization(gnn_model_index=1, meta_learning_epochs=100, act_fun="ReLu",
+hyp_opt_gnns = GNN_Models_HyperParameter_Optimization(gnn_model_index=4, meta_learning_epochs=100, act_fun="ReLu",
                                                       input_dataset=entire_dataset, dataset_name=DataSet_name,
                                                       weight_decay=1e-6, num_folds=5)
 

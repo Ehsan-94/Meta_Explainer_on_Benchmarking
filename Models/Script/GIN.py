@@ -299,13 +299,13 @@ class GIN_Model(nn.Module):
             graph_sizes = [len(batched_graphs[i].x) for i in range(len(batched_graphs))]
         else:
             graph_sizes = [len(batched_graphs.x)]
-        mlps_output_embeds = []
         mlps_output_embeds_pooled = []
+        mlps_output_embeds = []
+
         hid_rep = batched_graphs.x
         mlps_output_embeds.append(hid_rep)
-        mlps_output_embeds.append(hid_rep)
         for layer in range(self.num_mlp_layers):
-            hid_rep = self.gin_layer_process_eps(hid_rep, layer, batched_graphs, edge_mask, )
+            hid_rep = self.gin_layer_process_eps(hid_rep, layer, batched_graphs, edge_mask,)
             mlps_output_embeds.append(hid_rep)
 
         if self.joint_embeddings:
