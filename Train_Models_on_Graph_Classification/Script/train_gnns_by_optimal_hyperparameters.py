@@ -49,27 +49,31 @@ from time import perf_counter
 import csv
 import pickle
 from tqdm import tqdm
-
-
-
+import random
+import json
 from torch_geometric.nn import GCNConv, global_mean_pool
 from torch_geometric.loader import DataLoader
 import torch_geometric.nn as gnn
 
 class Train_GNNs_by_Optimal_Hyperparameters:
-    def __init__(self, GNN_Model_index, EPOCHS, dataset_index, winit_index, lr, dropout_rate, bias,
-                 batch_size, loss_function_index, weight_decay, act_fun, Model_Saving_Cycle, LOSS_Visualization_Cycle,
-                 default_path):
+    def __init__(self, GNN_Model_index, EPOCHS, dataset_index, winit_index, lr, dropout_rate, bias, batch_size, loss_function_index, weight_decay,
+                 act_fun, Model_Saving_Cycle, LOSS_Visualization_Cycle, default_path, seed):
+        self.seed = seed
+
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
         self.default_path = default_path
         os.chdir(self.default_path)
 
         self.LOSS_Visualization_Cycle = LOSS_Visualization_Cycle
         self.Model_Saving_Cycle = Model_Saving_Cycle
 
-        self.GNN_Models_Name = dict([(1, "GCN_plus_GAP_Model"), (2, "DGCNN_Model"), (3, "DIFFPOOL_Model"),
-                                     (4, "GIN_Model")])
+        self.GNN_Models_Name = dict([(1, "GCN_plus_GAP_Model"), (2, "DGCNN_Model"), (3, "DIFFPOOL_Model"), (4, "GIN_Model")])
         self.Datsets_Name_Dict = {1: "MUTAG", 2: "NCI1", 3: "Graph-SST5", 4: "ENZYMES", 5: "PROTEINS", 6: "IsCyclic"}
-        self.Weight_Initializer = {1: "XAVIER", 2: "Kaiming", 3: "Uniform"}
+        self.Weight_Initializer = {1: "XAVIER", 2: "Kaiming", 3: "Normal"}
         self.Loss_Function = {1: "CrossEntropy", 2: "MAE", 3: "MSE"}
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -98,7 +102,13 @@ class Train_GNNs_by_Optimal_Hyperparameters:
 
         sys.path.insert(0, self.default_path+'/Models/Script/Layers')
 
-
+        self.checkpoint_dir = os.path.join(self.default_path, "Train_Models_on_Graph_Classification", "Experimental_Results", self.GNN_Model_Name,)
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        self.last_checkpoint_path = None
+        self.diffpool_loss_history = []
+        for name, value in (("EPOCHS", EPOCHS), ("Model_Saving_Cycle", Model_Saving_Cycle), ("LOSS_Visualization_Cycle", LOSS_Visualization_Cycle),):
+            if (not isinstance(value, int) or isinstance(value, bool) or value <= 0):
+                raise ValueError(f"{name} must be a positive integer.")
 
         ###################################################################################################                    GCN
         if self.GNN_Model_Name == "GCN_plus_GAP_Model":
@@ -108,11 +118,12 @@ class Train_GNNs_by_Optimal_Hyperparameters:
             from Meta_Explainer_on_Benchmarking.Models.Script.Layers import IdenticalPooling as identicalpooling
             from Meta_Explainer_on_Benchmarking.Models.Script import GCN_plus_GAP as gcn_plus_gap_model
             node_feat_size = self.entire_dataset[0].x.size()[-1]
-            gcn_input_dim = {'MUTAG': node_feat_size, 'NCI1': node_feat_size, 'ENZYMES': 16, 'Graph-SST5': 64,
-                             "PROTEINS": 16, 'IsCyclic': node_feat_size}
+            print("node_feat_size: ", node_feat_size)
+            gcn_input_dim = {'MUTAG': node_feat_size, 'NCI1': node_feat_size, 'ENZYMES': 16, 'Graph-SST5': 64, "PROTEINS": 16,
+                             'IsCyclic': node_feat_size}
             self.GNN_Model = gcn_plus_gap_model.GCN_plus_GAP_Model(model_level="graph", num_classes=self.num_classes,
-                                                                   gnn_layers=[node_feat_size, gcn_input_dim[self.dataset_name]],
-                                                                   weight_initializer_index=self.weight_initializer, bias=self.bias, act_fun=act_fun,
+                                                                   gnn_layers=[node_feat_size, gcn_input_dim[self.dataset_name]], bias=self.bias,
+                                                                   weight_initializer_index=self.weight_initializer, act_fun=act_fun,
                                                                    dropout_rate=dropout_rate).to(self.device)
 
         ###################################################################################################                  DGCNN
@@ -126,15 +137,14 @@ class Train_GNNs_by_Optimal_Hyperparameters:
 
             k_dgcnn = {'MUTAG': 17, 'NCI1': 32, 'ENZYMES': 32, 'Graph-SST5': 19, 'PROTEINS': 26, 'IsCyclic': 20}
             node_feat_size = self.entire_dataset[0].x.size()[-1]
-            dgcnn_input_dim = {'MUTAG': [32, 32, 32, 1], 'NCI1': [32, 32, 32, 1], 'ENZYMES': [32, 32, 32, 1],
-                               'Graph-SST5': [64, 64, 64, 1], 'PROTEINS': [32, 32, 32, 1],
-                               'IsCyclic': [32, 32, 32, 1]}
+            dgcnn_input_dim = {'MUTAG': [32, 32, 32, 1], 'NCI1': [32, 32, 32, 1], 'ENZYMES': [32, 32, 32, 1], 'Graph-SST5': [32, 32, 32, 1],
+                               'PROTEINS': [32, 32, 32, 1], 'IsCyclic': [32, 32, 32, 1]}
             GNN_layers = dgcnn_input_dim[self.dataset_name]
             feature_width = sum(GNN_layers)
             conv1d_kernels=[feature_width, 5]
             strides=[feature_width, 1]
             self.GNN_Model = dgcnn_model.DGCNN_Model(GNN_layers=GNN_layers, bias=self.bias, num_classes=self.num_classes, mlp_act_fun="ReLu",
-                                                     dgcnn_act_fun="tanh", Weight_Initializer=self.weight_initializer, mlp_dropout_rate=dropout_rate,
+                                                     dgcnn_act_fun="tanh", weight_initializer_index=self.weight_initializer, mlp_dropout_rate=dropout_rate,
                                                      dgcnn_k=k_dgcnn[self.dataset_name], node_feat_size=node_feat_size, hid_channels=[16, 32],
                                                      conv1d_kernels=conv1d_kernels, ffn_layer_size=128, strides=strides).to(self.device)
         ###################################################################################################               DIFFPOOL
@@ -146,17 +156,14 @@ class Train_GNNs_by_Optimal_Hyperparameters:
             from Meta_Explainer_on_Benchmarking.Models.Script.Layers import Batched_DIFFPOOL_Layer as batched_diffpool_layer
             from Meta_Explainer_on_Benchmarking.Models.Script import DIFFPOOL as diffpool_model
             node_feat_size = self.entire_dataset[0].x.size()[-1]
-            self.GNN_Model = diffpool_model.DIFFPOOL_Model(embedding_input_dim=node_feat_size,
-                                                           embedding_num_block_layers=1, embedding_hid_dim=64,
-                                                           new_feature_size=64, assignment_input_dim=node_feat_size,
-                                                           assignment_num_block_layers=1, assignment_hid_dim=64,
-                                                           max_number_of_nodes=256, prediction_hid_layers=[50],
-                                                           concat_neighborhood=False, num_classes=self.num_classes,
-                                                           weight_initializer_index=self.weight_initializer, bias=self.bias,
-                                                           act_fun=act_fun, dropout_rate=dropout_rate,
-                                                           normalize_graphsage=False, aggregation="mean",
-                                                           concat_diffpools_outputs=True,num_pooling=1,
-                                                           pooling="mean").to(self.device)
+            self.GNN_Model = diffpool_model.DIFFPOOL_Model(embedding_input_dim=node_feat_size, embedding_num_block_layers=1, embedding_hid_dim=64,
+                                                           new_feature_size=64, assignment_input_dim=node_feat_size, assignment_num_block_layers=1,
+                                                           assignment_hid_dim=64, max_number_of_nodes=256, prediction_hid_layers=[50],
+                                                           concat_neighborhood=False, num_classes=self.num_classes, bias=self.bias,
+                                                           weight_initializer_index=self.weight_initializer, act_fun=act_fun,
+                                                           dropout_rate=dropout_rate, normalize_graphsage=False, aggregation="mean",
+                                                           concat_diffpools_outputs=True, num_pooling=1, pooling="mean", use_batch_norm=False,
+                                                           pooling_ratio=None).to(self.device)
         ###################################################################################################                    GIN
         if self.GNN_Model_Name == "GIN_Model":
             sys.path.insert(0, default_path+'/Models/Script')
@@ -166,15 +173,13 @@ class Train_GNNs_by_Optimal_Hyperparameters:
 
             gin_input_dim = {'MUTAG': node_feat_size, 'NCI1': node_feat_size, 'ENZYMES': 16, 'Graph-SST5': 64,
                              'PROTEINS': 16, 'IsCyclic': node_feat_size}
-            self.GNN_Model = gin_model.GIN_Model(num_mlp_layers=4, Bias=self.bias, num_slp_layers=2,
+            self.GNN_Model = gin_model.GIN_Model(num_mlp_layers=4, bias=self.bias, num_slp_layers=2,
                                                  mlp_act_fun=act_fun, mlp_input_dim=node_feat_size,
-                                                 mlp_hid_dim=gin_input_dim[self.dataset_name], joint_embeddings=False,
-                                                 mlp_output_dim=self.num_classes, dropout_rate=dropout_rate,
-                                                 Weight_Initializer=self.weight_initializer).to(self.device)
-
+                                                 mlp_hid_dim=gin_input_dim[self.dataset_name], joint_embeddings=True,
+                                                 mlp_output_dim=self.num_classes, dropout_rate=dropout_rate, train_eps=True,
+                                                 weight_initializer_index=self.weight_initializer).to(self.device)
         ###################################################################################################              Optimizer
-        self.GNN_Model_Optimizer = torch.optim.Adam(self.GNN_Model.parameters(), lr=self.classifier_lr,
-                                                    weight_decay=self.classifier_weight_decay)
+        self.GNN_Model_Optimizer = torch.optim.Adam(self.GNN_Model.parameters(), lr=self.classifier_lr, weight_decay=self.classifier_weight_decay)
         ###################################################################################################          Loss Function
         if self.loss_function == "CrossEntropy":
             self.criterion = torch.nn.CrossEntropyLoss().to(self.device)
@@ -182,6 +187,49 @@ class Train_GNNs_by_Optimal_Hyperparameters:
             self.criterion = torch.nn.L1Loss().to(self.device)
         elif self.loss_function == "MSE":
             self.criterion = torch.nn.MSELoss().to(self.device)
+
+    def open_unique_output(self, path):
+        stem, extension = os.path.splitext(path)
+        repeat = 1
+        while True:
+            candidate = (path if repeat == 1 else f"{stem}_repeat{repeat:02d}{extension}")
+            try:
+                return candidate, open(candidate, "xb")
+            except FileExistsError:
+                repeat += 1
+    def save_checkpoint(self, completed_epochs, loss_history):
+        configuration = {"model": self.GNN_Model_Name, "dataset": self.dataset_name, "planned_gnn_epochs": self.EPOCHS,
+                         "learning_rate": self.classifier_lr, "weight_decay": self.classifier_weight_decay, "dropout_rate": self.dropout_rate,
+                         "bias": self.bias, "batch_size": self.batch_size, "loss_function": self.loss_function,
+                         "weight_initializer": self.weight_initializer, "activation": self.act_fun, "diffpool_link_weight": self.diffpool_link_weight,
+                         "diffpool_entropy_weight": self.diffpool_entropy_weight, "seed": self.seed,}
+
+        # Architecture-specific settings from the actual constructed model.
+        for attribute in ("GNN_layers", "gnn_layers", "dgcnn_k", "conv1d_kernels", "strides", "num_mlp_layers", "num_slp_layers", "mlp_input_dim",
+                          "mlp_hid_dim","mlp_output_dim", "joint_embeddings", "train_eps", "num_pooling", "pooling_ratio", "pooling",
+                          "concat_diffpools_outputs", "normalize_graphsage",):
+            value = getattr(self.GNN_Model, attribute, None)
+            if isinstance(value, (str, int, float, bool, list, tuple)):
+                configuration[attribute] = value
+
+        checkpoint = {"gnn_epochs": completed_epochs, "model_state_dict": self.GNN_Model.state_dict(),
+                      "optimizer_state_dict": self.GNN_Model_Optimizer.state_dict(), "configuration": configuration,
+                      "model_description": repr(self.GNN_Model), "loss": list(loss_history),
+                      "training_accuracy": list(self.GNN_Model_training_Acc_per_epoch), "diffpool_loss_history": list(self.diffpool_loss_history),
+                      "training_time_per_epoch": list(self.GNN_Model_training_time_per_epoch), "train_indices": list(self.train_indices),
+                      "test_indices": list(self.test_indices), "torch_version": str(torch.__version__), }
+
+        filename = (f"{self.GNN_Model_Name}_{self.dataset_name}_" f"{completed_epochs}.pt")
+        requested_path = os.path.join(self.checkpoint_dir, filename)
+        saved_path, checkpoint_file = self.open_unique_output(requested_path)
+
+        with checkpoint_file:
+            torch.save(checkpoint, checkpoint_file)
+
+        self.last_checkpoint_path = saved_path
+        tqdm.write(f"Saved checkpoint: {saved_path}")
+
+        return saved_path
 
     def my_dataset(self):
 
@@ -198,7 +246,7 @@ class Train_GNNs_by_Optimal_Hyperparameters:
             with open("/data/cs.aau.dk/ey33jw/Datasets_for_Explainability_Methods/IsCyclic/iscyclic_graphs.pkl", 'rb') as f:
                 self.entire_dataset = pickle.load(f)
         else:
-            self.entire_dataset = TUDataset(root='data/TUDataset', name=self.dataset_name)
+            self.entire_dataset = TUDataset(root='data/TUDataset', name=self.dataset_name,)# use_node_attr=True)
 
         labels = []
         for graph in self.entire_dataset:
@@ -211,26 +259,65 @@ class Train_GNNs_by_Optimal_Hyperparameters:
                              "Train_and_Test_Indexes_on_Graph_Classification/Experimental_Results/" +
                              "train_test_indexes_" + str(self.dataset_name) + ".csv")
 
-        read_training_list_indexes__ = df['Train Indexes']
-        read_test_list_indexes__ = df['Test Indexes']
-        read_test_list_indexes__ = read_test_list_indexes__.dropna()
-        read_test_list_indexes = []
-        read_training_list_indexes = []
-        for element in read_test_list_indexes__:
-            read_test_list_indexes.append(int(element))
-        for element in read_training_list_indexes__:
-            read_training_list_indexes.append(int(element))
+        def read_indices(column_name):
+            values = pandas.to_numeric(df[column_name].dropna(), errors="raise",).to_numpy(dtype=np.float64)
 
-        self.train_dataset = []
-        self.test_dataset = []
-        for index in read_training_list_indexes:
-            self.train_dataset.append(self.entire_dataset[index])
-        for index in read_test_list_indexes:
-            self.test_dataset.append(self.entire_dataset[index])
+            if not np.isfinite(values).all():
+                raise ValueError(f"{column_name} contains nonfinite indices.")
+
+            if not np.equal(values, np.floor(values)).all():
+                raise ValueError(f"{column_name} contains fractional indices.")
+
+            if ((values < 0).any() or (values >= len(self.entire_dataset)).any()):
+                raise ValueError(f"{column_name} contains out-of-range indices.")
+
+            indices = [int(value) for value in values]
+            if not indices:
+                raise ValueError(f"{column_name} is empty.")
+
+            if len(indices) != len(set(indices)):
+                raise ValueError(f"{column_name} contains duplicate indices.")
+
+            return indices
+
+        train_indices = read_indices("Train Indexes")
+        test_indices = read_indices("Test Indexes")
+
+        overlap = set(train_indices) & set(test_indices)
+        if overlap:
+            raise ValueError("Training and test splits overlap. " f"Example indices: {sorted(overlap)[:10]}")
+        dataset_labels = []
+
+        for index, graph in enumerate(self.entire_dataset):
+            label = torch.as_tensor(graph.y).detach().cpu().reshape(-1)
+
+            if label.numel() != 1:
+                raise ValueError(f"Graph {index} must have one class label.")
+
+            value = label.item()
+            if not np.isfinite(value) or value != int(value):
+                raise ValueError(f"Graph {index} has an invalid class label: {value}")
+
+            dataset_labels.append(int(value))
+
+        observed_classes = set(dataset_labels)
+        expected_classes = set(range(self.num_classes))
+
+        if observed_classes != expected_classes:
+            raise ValueError(f"Expected labels {sorted(expected_classes)}, "f"found {sorted(observed_classes)}.")
+
+        training_classes = {dataset_labels[index] for index in train_indices}
+        if training_classes != expected_classes:
+            raise ValueError("The training split does not contain every class.")
+
+        self.train_indices = train_indices
+        self.test_indices = test_indices
+        self.train_dataset = [self.entire_dataset[index] for index in train_indices]
+        self.test_dataset = [self.entire_dataset[index] for index in test_indices]
         os.chdir(self.default_path)
+        train_dataloader = DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=False,)
+        test_dataloader = DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False,)
 
-        train_dataloader = DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=False)
-        test_dataloader = DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False)
         return train_dataloader, test_dataloader
 
     def loss_calculations(self, class_scores, probabilities, labels):
@@ -257,21 +344,29 @@ class Train_GNNs_by_Optimal_Hyperparameters:
         plt.title(" Loss in Epoch: " + str(epoch_history))
 
         ax.plot(GNN_Model_losses_list, color='r')
-
-        plt.savefig("/data/cs.aau.dk/ey33jw/Train_GNNs_by_Optimal_HyperParameters/Plots/" +
-                    self.GNN_Model_Name + "_" + self.dataset_name + '_Loss_vs_Epoch_{:04d}.png'.format(epoch_history))
-        # plt.show()
-        plt.close()
+        plot_dir = os.path.join(self.checkpoint_dir, "Plots")
+        os.makedirs(plot_dir, exist_ok=True)
+        requested_path = os.path.join(plot_dir, f"{self.GNN_Model_Name}_{self.dataset_name}_"f"epoch{epoch_history:04d}_loss.png",)
+        try:
+            saved_path, plot_file = self.open_unique_output(requested_path)
+            with plot_file:
+                fig.savefig(plot_file, format="png")
+        finally:
+            plt.close(fig)
 
     def train_step(self):
-        GNN_Model_loss_batch = []
+        total_loss = 0.0
+        total_graphs = 0
         Pred_Labels = []
         Real_Labels = []
+        component_totals = {"classification": 0.0, "link": 0.0, "entropy": 0.0,}
 
         self.GNN_Model.train()
+
         for batch_of_graphs in self.train_dataloaded:
-            self.GNN_Model_Optimizer.zero_grad()
+            self.GNN_Model_Optimizer.zero_grad(set_to_none=True)
             batch_of_graphs = batch_of_graphs.to(self.device)
+
             if self.GNN_Model.__class__.__name__ == "GCN_plus_GAP_Model":
                 Output_of_Hidden_Layers, pooling_layer_output, ffn_output, soft = self.GNN_Model(batch_of_graphs, None)
                 batch_loss = self.loss_calculations(class_scores=ffn_output, probabilities=soft, labels=batch_of_graphs.y,)
@@ -291,56 +386,52 @@ class Train_GNNs_by_Optimal_Hyperparameters:
                                                              labels=batch_of_graphs.y, )
                 batch_loss = (classification_loss + self.diffpool_link_weight * auxiliary["link_loss"] + self.diffpool_entropy_weight * auxiliary[
                     "entropy_loss"])
+                count = batch_of_graphs.y.reshape(-1).numel()
+                component_totals["classification"] += (classification_loss.detach().item() * count)
+                component_totals["link"] += (auxiliary["link_loss"].detach().item() * count)
+                component_totals["entropy"] += (auxiliary["entropy_loss"].detach().item() * count)
                 Pred_Labels.extend(prediction_output.argmax(dim=1).detach().tolist())
 
             elif self.GNN_Model.__class__.__name__ == "GIN_Model":
                 (mlps_output_embeds, mlp_outputs_globalSUMpooled, lin1_output, lin1_output_dropouted, lin2_output,
                  lin2_output_softmaxed) = self.GNN_Model(batch_of_graphs, None)
-                batch_loss = self.loss_calculations(class_scores=lin2_output, probabilities=lin2_output_softmaxed,
-                                                    labels=batch_of_graphs.y, )
+                batch_loss = self.loss_calculations(class_scores=lin2_output, probabilities=lin2_output_softmaxed, labels=batch_of_graphs.y, )
                 Pred_Labels.extend(lin2_output_softmaxed.argmax(dim=1).detach().tolist())
 
             else:
-                raise Exception("We cover GCN_plus_GAP, DGCNN, DIFFPOOL, and GIN.")
+                raise ValueError(f"Unsupported model: {self.GNN_Model.__class__.__name__}")
 
-            Real_Labels.extend(batch_of_graphs.y.detach().tolist())
-            GNN_Model_loss_batch.append(batch_loss.detach())
+            labels = batch_of_graphs.y.reshape(-1).long()
+            Real_Labels.extend(labels.detach().cpu().tolist())
+
+            batch_graph_count = labels.numel()
+            total_loss += batch_loss.detach().item() * batch_graph_count
+            total_graphs += batch_graph_count
             if not torch.isfinite(batch_loss):
-                print(
-                    "[NON-FINITE LOSS]",
-                    "model =", self.GNN_Model_Name,
-                    "dataset =", self.dataset_name,
-                    "loss =", batch_loss.item(),
-                )
+                print("[NON-FINITE LOSS]", "model =", self.GNN_Model_Name, "dataset =", self.dataset_name, "loss =", batch_loss.item(),)
                 raise RuntimeError("GNN loss became non-finite.")
 
             batch_loss.backward()
             for name, parameter in self.GNN_Model.named_parameters():
                 if parameter.grad is not None and not torch.isfinite(parameter.grad).all():
-                    print(
-                        "[NON-FINITE GRADIENT]",
-                        "model =", self.GNN_Model_Name,
-                        "dataset =", self.dataset_name,
-                        "parameter =", name,
-                        "nan =", torch.isnan(parameter.grad).sum().item(),
-                        "inf =", torch.isinf(parameter.grad).sum().item(),
-                    )
+                    print("[NON-FINITE GRADIENT]", "model =", self.GNN_Model_Name, "dataset =", self.dataset_name, "parameter =", name, "nan =",
+                          torch.isnan(parameter.grad).sum().item(), "inf =", torch.isinf(parameter.grad).sum().item(), )
                     raise RuntimeError("GNN gradient became non-finite.")
 
             self.GNN_Model_Optimizer.step()
             for name, parameter in self.GNN_Model.named_parameters():
                 if not torch.isfinite(parameter).all():
-                    print(
-                        "[NON-FINITE PARAMETER AFTER STEP]",
-                        "model =", self.GNN_Model_Name,
-                        "dataset =", self.dataset_name,
-                        "parameter =", name,
-                        "nan =", torch.isnan(parameter).sum().item(),
-                        "inf =", torch.isinf(parameter).sum().item(),
-                    )
+                    print("[NON-FINITE PARAMETER AFTER STEP]", "model =", self.GNN_Model_Name, "dataset =", self.dataset_name, "parameter =", name,
+                          "nan =", torch.isnan(parameter).sum().item(), "inf =", torch.isinf(parameter).sum().item(), )
                     raise RuntimeError("GNN parameter became non-finite.")
 
-        return (torch.mean(torch.stack(GNN_Model_loss_batch)), metrics.accuracy_score(Real_Labels, Pred_Labels))
+        if total_graphs == 0:
+            raise ValueError("Training loader contains no graphs.")
+        epoch_loss = torch.tensor(total_loss / total_graphs, dtype=torch.float32,)
+        training_accuracy = metrics.accuracy_score(Real_Labels, Pred_Labels,)
+        if self.GNN_Model_Name == "DIFFPOOL_Model":
+            self.diffpool_loss_history.append({name: value / total_graphs for name, value in component_totals.items()})
+        return epoch_loss, training_accuracy
 
     def start_training(self):
         GNN_Model_training_loss_per_epoch = []
@@ -349,134 +440,163 @@ class Train_GNNs_by_Optimal_Hyperparameters:
             t1 = perf_counter()
             GNN_Model_training_loss, training_acc = self.train_step()
             self.GNN_Model_training_time_per_epoch.append(perf_counter()-t1)
-            print(f'Epoch: {epoch+1:03d}, Model Loss: {GNN_Model_training_loss:.4f}, Accuracy: {training_acc:.2f}')
+            tqdm.write(f"Epoch: {epoch + 1:03d}, "f"Loss: {GNN_Model_training_loss:.4f}, "f"Train Accuracy: {training_acc:.2%}")
+            if self.GNN_Model_Name == "DIFFPOOL_Model":
+                components = self.diffpool_loss_history[-1]
 
+                tqdm.write(f"  Classification: {components['classification']:.4f}, "
+                           f"Link: {components['link']:.4f}, "f"Entropy: {components['entropy']:.4f}")
             GNN_Model_training_loss_per_epoch.append(GNN_Model_training_loss)
             self.GNN_Model_training_Acc_per_epoch.append(training_acc)
 
             if (epoch + 1) % self.LOSS_Visualization_Cycle == 0 and epoch > 0:
                 self.visualize_losses(GNN_Model_training_loss_per_epoch, epoch + 1)
-            if (epoch + 1) % self.Model_Saving_Cycle == 0 and epoch > 0:
-                torch.save({'epoch': epoch+1, 'model_state_dict': self.GNN_Model.state_dict(),
-                            'optimizer_state_dict': self.GNN_Model_Optimizer.state_dict(),
-                            'loss': GNN_Model_training_loss_per_epoch},
-                           "/data/cs.aau.dk/ey33jw/Train_GNNs_by_Optimal_HyperParameters/" + self.GNN_Model_Name + "/" +
-                           self.GNN_Model_Name + "_" + self.dataset_name + "_" + str(epoch + 1)+".pt")
+            completed_epochs = epoch + 1
+            should_save = (completed_epochs % self.Model_Saving_Cycle == 0 or completed_epochs == self.EPOCHS)
+            if should_save:
+                self.save_checkpoint(completed_epochs, GNN_Model_training_loss_per_epoch,)
 
+    @torch.no_grad()
     def gnn_model_test(self):
+        self.GNN_Model.eval()
 
-        GNN_Preds = []
-        Real_Labels = []
+        probability_batches = []
+        label_batches = []
 
-        if self.GNN_Model_Name == "GCN_plus_GAP_Model":
-            self.GNN_Model.eval()
+        for batch_of_graphs in self.test_dataloaded:
+            batch_of_graphs = batch_of_graphs.to(self.device)
 
-            for batch_of_graphs in self.test_dataset:
-                batch_of_graphs = batch_of_graphs.to(self.device)
-                Output_of_Hidden_Layers_test, pooling_layer_output_test, ffn_output_test, gcn_soft_test = self.GNN_Model(batch_of_graphs, None)
-                GNN_Model_test_pred = gcn_soft_test.argmax(dim=1)
-                GNN_Preds.extend(GNN_Model_test_pred.tolist())
-                Real_Labels.extend(batch_of_graphs.y.tolist())
+            if self.GNN_Model_Name == "GCN_plus_GAP_Model":
+                (Output_of_Hidden_Layers_test, pooling_layer_output_test, ffn_output_test, gcn_soft_test,) = self.GNN_Model(batch_of_graphs, None)
+                probabilities = gcn_soft_test
 
-            return self.Evaluations(np.array(Real_Labels), np.array(GNN_Preds))
+            elif self.GNN_Model_Name == "DGCNN_Model":
+                (final_GNN_layer_output, sortpooled_embedings, output_conv1d_1, maxpooled_output_conv1d_1, output_conv1d_2, to_dense, ffn_1,
+                 dropout_ffn_1, ffn_2, dgcnn_softmaxed_ffn_2_test,) = self.GNN_Model(batch_of_graphs, None)
+                probabilities = dgcnn_softmaxed_ffn_2_test
 
-        elif self.GNN_Model_Name == "DGCNN_Model":
-            self.GNN_Model.eval()
+            elif self.GNN_Model_Name == "DIFFPOOL_Model":
+                (concatination_list_of_poolings, prediction_output_without_soft, prediction_output,) = self.GNN_Model(batch_of_graphs, edge_mask=None,
+                                                                                                                      return_aux_losses=False, )
+                probabilities = prediction_output
 
-            for batch_of_graphs in self.test_dataset:
-                batch_of_graphs = batch_of_graphs.to(self.device)
-                final_GNN_layer_output, sortpooled_embedings, output_conv1d_1, maxpooled_output_conv1d_1, output_conv1d_2, to_dense, ffn_1, dropout_ffn_1, ffn_2, dgcnn_softmaxed_ffn_2_test = self.GNN_Model(batch_of_graphs, None)
-                GNN_Model_test_pred = dgcnn_softmaxed_ffn_2_test.argmax(dim=1)
-                GNN_Preds.extend(GNN_Model_test_pred.tolist())
-                Real_Labels.extend(batch_of_graphs.y.tolist())
+            elif self.GNN_Model_Name == "GIN_Model":
+                (mlps_output_embeds, mlp_outputs_globalSUMpooled, lin1_output, lin1_output_dropouted, lin2_output,
+                 lin2_output_softmaxed,) = self.GNN_Model(batch_of_graphs, None)
+                probabilities = lin2_output_softmaxed
 
-            return self.Evaluations(np.array(Real_Labels), np.array(GNN_Preds))
+            else:
+                raise ValueError(f"Unsupported model: {self.GNN_Model_Name}")
+            probability_batches.append(probabilities.detach().cpu())
+            label_batches.append(batch_of_graphs.y.reshape(-1).long().cpu())
 
+        if not probability_batches:
+            raise ValueError("Test loader contains no graphs.")
 
-        elif self.GNN_Model_Name == "DIFFPOOL_Model":
-            self.GNN_Model.eval()
+        probabilities = torch.cat(probability_batches, dim=0).numpy()
+        labels = torch.cat(label_batches, dim=0).numpy()
 
-            for batch_of_graphs in self.test_dataset:
-                batch_of_graphs = batch_of_graphs.to(self.device)
-                concatination_list_of_poolings, prediction_output_without_soft, prediction_output = self.GNN_Model(batch_of_graphs, edge_mask=None,
-                                                                                                                   return_aux_losses=False)
-                GNN_Model_test_pred = prediction_output.argmax(dim=1)
-                GNN_Preds.extend(GNN_Model_test_pred.tolist())
-                Real_Labels.extend(batch_of_graphs.y.tolist())
-
-            return self.Evaluations(np.array(Real_Labels), np.array(GNN_Preds))
-
-        elif self.GNN_Model_Name == "GIN_Model":
-            self.GNN_Model.eval()
-
-            for batch_of_graphs in self.test_dataset:
-                batch_of_graphs = batch_of_graphs.to(self.device)
-                mlps_output_embeds, mlp_outputs_globalSUMpooled, lin1_output, lin1_output_dropouted, lin2_output, lin2_output_softmaxed = self.GNN_Model(batch_of_graphs, None)
-                GNN_Model_test_pred = lin2_output_softmaxed.argmax(dim=1)
-                GNN_Preds.extend(GNN_Model_test_pred.tolist())
-                Real_Labels.extend(batch_of_graphs.y.tolist())
-
-            return self.Evaluations(np.array(Real_Labels), np.array(GNN_Preds))
+        return self.Evaluations(labels, probabilities)
 
     def multiclass_tensor_converter(self, mylabels):
         one_hot_labels = F.one_hot(mylabels, num_classes=self.num_classes).to(torch.float32)
         return one_hot_labels
 
-    def Evaluations(self, y, pred):
-        print("pred: ", pred)
-        print("y: ", y)
+    def Evaluations(self, y, probabilities):
+        y = np.asarray(y).reshape(-1)
+        probabilities = np.asarray(probabilities)
 
-        new_pred = self.multiclass_tensor_converter(torch.from_numpy(pred))
+        if y.size == 0:
+            raise ValueError("Evaluation contains no graphs.")
+
+        expected_shape = (len(y), self.num_classes)
+        if probabilities.shape != expected_shape:
+            raise ValueError(f"Expected probabilities shaped {expected_shape}, "f"received {probabilities.shape}.")
+
+        if not np.isin(y, np.arange(self.num_classes)).all():
+            raise ValueError("Labels must be integers from 0 to num_classes - 1.")
+
+        if not np.isfinite(probabilities).all():
+            raise ValueError("Probabilities contain nonfinite values.")
+
+        if np.any(probabilities < 0) or np.any(probabilities > 1):
+            raise ValueError("Probabilities must lie between 0 and 1.")
+
+        if not np.allclose(probabilities.sum(axis=1), 1.0, rtol=1e-5, atol=1e-6,):
+            raise ValueError("Class probabilities must sum to one.")
+
+        pred = probabilities.argmax(axis=1)
 
         auc_roc_scores = []
         auc_prc_scores = []
-        precision_scores = []
-        recall_scores = []
-        for i in range(self.num_classes):
-            aucroc = metrics.roc_auc_score(y_true=y==i, y_score=new_pred[:, i])
-            auc_roc_scores.append(aucroc)
+        average_precision_scores = []
 
-            precision, recall, thresholds = metrics.precision_recall_curve(y_true= y == i,  probas_pred=new_pred[:, i])
+        for class_index in range(self.num_classes):
+            binary_labels = (y == class_index).astype(int)
+            class_scores = probabilities[:, class_index]
+
+            if np.unique(binary_labels).size != 2:
+                raise ValueError(f"ROC-AUC requires positive and negative examples " f"for class {class_index}.")
+
+            auc_roc_scores.append(metrics.roc_auc_score(binary_labels, class_scores))
+            precision, recall, _ = metrics.precision_recall_curve(binary_labels, class_scores, )
             auc_prc_scores.append(metrics.auc(recall, precision))
+            average_precision_scores.append(metrics.average_precision_score(binary_labels, class_scores, ))
 
-            precision_scores.append(precision)
-            recall_scores.append(recall)
+        AUC_ROC = float(np.mean(auc_roc_scores))
+        AUC_PRC = float(np.mean(auc_prc_scores))
+        macro_average_precision = float(np.mean(average_precision_scores))
+        precision_per_class = metrics.precision_score(y_true=y, y_pred=pred, labels=np.arange(self.num_classes), average=None, zero_division=0,)
 
-        AUC_ROC = mean(auc_roc_scores)
-        print("AUC_ROC: ", AUC_ROC)
+        ACC_Quantitative = int(metrics.accuracy_score(y, pred, normalize=False))
+        ACC_Probabilistic = float(metrics.accuracy_score(y, pred))
 
-        AUC_PRC = mean(auc_prc_scores)
-        print("AUC_PRC: ", AUC_PRC)
+        print("Macro one-vs-rest ROC-AUC:", AUC_ROC)
+        print("Macro one-vs-rest trapezoidal PR-AUC:", AUC_PRC)
+        print("Macro average precision:", macro_average_precision)
+        print("Precision per class:", precision_per_class)
+        print("Correct predictions:", ACC_Quantitative)
+        print("Accuracy:", ACC_Probabilistic)
+        self.evaluation_metrics = {"macro_roc_auc": AUC_ROC, "macro_trapezoidal_pr_auc": AUC_PRC, "macro_average_precision": macro_average_precision,
+                                   "precision_per_class": precision_per_class.tolist(), "correct_predictions": ACC_Quantitative,
+                                   "accuracy": ACC_Probabilistic,}
 
-        precision_scores = metrics.precision_score(y_true=y, y_pred=pred, average=None, zero_division=0)
-        print("Precision: ", precision_scores)
+        return (AUC_ROC, AUC_PRC, ACC_Quantitative, ACC_Probabilistic,)
 
-        ACC_Quantitative = metrics.accuracy_score(y, pred.round(), normalize=False)
-        print("ACC_Quantitative: ", ACC_Quantitative)
-        ACC_Probabilistic = metrics.accuracy_score(y, pred.round(), normalize=True)
-        print("ACC_Probabilistic: ", ACC_Probabilistic)
-
-        return AUC_ROC, AUC_PRC, ACC_Quantitative, ACC_Probabilistic
     def __call__(self):
         self.start_training()
-        self.gnn_model_test()
+        result = self.gnn_model_test()
+
+        if self.last_checkpoint_path is None:
+            raise RuntimeError("No training checkpoint was saved.")
+
+        metrics_path = (os.path.splitext(self.last_checkpoint_path)[0] + "_evaluation.json")
+        payload = {"checkpoint_path": self.last_checkpoint_path, "dataset": self.dataset_name, "model": self.GNN_Model_Name, "split": "test",
+                   "metrics": self.evaluation_metrics, }
+        saved_path, metrics_file = self.open_unique_output(metrics_path)
+        with metrics_file:
+            metrics_file.write(json.dumps(payload, indent=2, allow_nan=False).encode("utf-8"))
+
+        tqdm.write(f"Saved evaluation: {saved_path}")
+        return result
 
 # Datsets_Name_Dict = {1: "MUTAG", 2: "NCI1", 3: "Graph-SST5", 4: "ENZYMES", 5: "PROTEINS", 6: "IsCyclic"}
-# Weight_Initializer = {1:"XAVIER", 2:"Kaiming", 3:"Uniform"}
+# Weight_Initializer = {1:"XAVIER", 2:"Kaiming", 3:"Normal"}
 # Loss Function = {1:"CrossEntropy", 2:"MAE", 3:"MSE"}
-train_the_GNN_Model = Train_GNNs_by_Optimal_Hyperparameters(GNN_Model_index=1, EPOCHS=5000, dataset_index=3, bias=True,
-                                                            winit_index=2, lr=0.000398845, dropout_rate=0.376534632,
-                                                            batch_size=64, loss_function_index=1, weight_decay=1e-6,
-                                                            act_fun="ReLu", Model_Saving_Cycle=1000,
-                                                            LOSS_Visualization_Cycle=500,
-                                                            default_path='/data/cs.aau.dk/ey33jw/Meta_Explainer_on_Benchmarking')
-train_the_GNN_Model()
 
-
-
-# train_the_GNN_Model = Train_GNNs_by_Optimal_Hyperparameters(GNN_Model_index=4, EPOCHS=5000, dataset_index=1, bias=True,
-#                                                             winit_index=2, lr=0.0001, dropout_rate=0.3,
+# train_the_GNN_Model = Train_GNNs_by_Optimal_Hyperparameters(GNN_Model_index=1, EPOCHS=5000, dataset_index=3, bias=True,
+#                                                             winit_index=2, lr=0.000398845, dropout_rate=0.376534632,
 #                                                             batch_size=64, loss_function_index=1, weight_decay=1e-6,
 #                                                             act_fun="ReLu", Model_Saving_Cycle=1000,
 #                                                             LOSS_Visualization_Cycle=500,
-#                                                             default_path='/data/cs.aau.dk/ey33jw/Explainability_Methods')
+#                                                             default_path='/data/cs.aau.dk/ey33jw/Meta_Explainer_on_Benchmarking')
+# train_the_GNN_Model()
+
+
+if __name__ == "__main__":
+    train_the_GNN_Model = Train_GNNs_by_Optimal_Hyperparameters(GNN_Model_index=1, EPOCHS=500, dataset_index=4, bias=True, winit_index=1,
+                                                                lr=0.009999760794452917, dropout_rate=0.25, batch_size=48, loss_function_index=1,
+                                                                weight_decay=1e-6, act_fun="ReLu", Model_Saving_Cycle=50, LOSS_Visualization_Cycle=50,
+                                                                default_path="/data/cs.aau.dk/ey33jw/Meta_Explainer_on_Benchmarking", seed=42, )
+
+    train_the_GNN_Model()

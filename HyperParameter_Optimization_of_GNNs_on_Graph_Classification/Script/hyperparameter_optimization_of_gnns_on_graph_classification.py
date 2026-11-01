@@ -74,12 +74,12 @@ class GNN_Models_HyperParameter_Optimization:
         self.Model_Saving_Cycle = 100
         self.Explainability_name = "HyperParameter_Optimization_of_GNNs"
         self.Task_name = "Graph_Classification"
-        self.default_path = '/data/cs.aau.dk/ey33jw/Explainability_Methods/'
+        self.parent_dir = '/data/cs.aau.dk/ey33jw/'
+        self.default_path = os.path.join(self.parent_dir, 'Meta_Explainer_on_Benchmarking/')
         os.chdir(self.default_path)
-        self.csv_files_path = "/data/cs.aau.dk/ey33jw/Optimized_HyperParameters_for_GNN_Models/"
+        self.csv_files_path = os.path.join(self.parent_dir, "Optimized_HyperParameters_for_GNN_Models/")
         for folder in ("csv_files", "figures"):
-            os.makedirs(os.path.join(self.csv_files_path, self.Task_name, self.GNN_Model_name, folder, ),
-                        exist_ok=True, )
+            os.makedirs(os.path.join(self.csv_files_path, self.Task_name, self.GNN_Model_name, folder, ), exist_ok=True, )
         current_directory = os.getcwd()
         # print("Current Working Directory:", current_directory)
 
@@ -247,9 +247,8 @@ class GNN_Models_HyperParameter_Optimization:
             Models = {}
             k_dgcnn = {'MUTAG': 17, 'NCI1': 32, 'ENZYMES': 32, 'Graph-SST5': 19, 'PROTEINS': 26, 'IsCyclic': 20}
             node_feat_size = your_dataset[0].x.size()[-1]
-            dgcnn_input_dim = {'MUTAG': [32, 32, 32, 1], 'NCI1': [32, 32, 32, 1], 'ENZYMES': [32, 32, 32, 1],
-                               'Graph-SST5': [32, 32, 32, 1], 'PROTEINS': [32, 32, 32, 1],
-                               'IsCyclic': [32, 32, 32, 1]}
+            dgcnn_input_dim = {'MUTAG': [32, 32, 32, 1], 'NCI1': [32, 32, 32, 1], 'ENZYMES': [32, 32, 32, 1], 'Graph-SST5': [32, 32, 32, 1],
+                               'PROTEINS': [32, 32, 32, 1], 'IsCyclic': [32, 32, 32, 1]}
             GNN_layers = dgcnn_input_dim[self.dataset_name]
             feature_width = sum(GNN_layers)
             conv1d_kernels=[feature_width, 5]
@@ -665,8 +664,7 @@ class GNN_Models_HyperParameter_Optimization:
     def save_best_hyperparameters(self):
         best = self.meta_optimizer.max
 
-        result = {"dataset": self.dataset_name, "gnn": self.GNN_Model_name,
-                  "mean_validation_macro_roc_auc": float(best["target"]),
+        result = {"dataset": self.dataset_name, "gnn": self.GNN_Model_name, "mean_validation_macro_roc_auc": float(best["target"]),
                   "hyperparameters": self.decode_hyperparameters(best["params"]), "weight_decay": self.weight_decay,
                   "activation": self.act_fun, "num_folds": self.num_folds,}
 
@@ -734,12 +732,12 @@ class GNN_Models_HyperParameter_Optimization:
         plt.close()
 
 # RUN_DATASETS = ["MUTAG", "NCI1", "Graph-SST5", "ENZYMES", "PROTEINS", "IsCyclic", ]
-DataSet_name = "MUTAG"
+DataSet_name = "ENZYMES"
 original_directory = os.getcwd()
 
 try:
     os.chdir("/data/cs.aau.dk/ey33jw/Meta_Explainer_on_Benchmarking")
-    dataset_loader = Load_Dataset_Module.load_dataset(dataset_name=DataSet_name, BATCH_SIZE=64, )
+    dataset_loader = Load_Dataset_Module.load_dataset(dataset_name=DataSet_name, BATCH_SIZE=64,)
     (train_dataset, test_dataset, train_dataloader, test_dataloader, num_classes, entire_dataset,) = dataset_loader()
 
 finally:
@@ -748,8 +746,7 @@ finally:
 
 #.  GNN_Models_Name = dict([(1, "GCN_plus_GAP"), (2, "DGCNN"), (3, "DIFFPOOL"), (4, "GIN")])
 
-hyp_opt_gnns = GNN_Models_HyperParameter_Optimization(gnn_model_index=4, meta_learning_epochs=100, act_fun="ReLu",
-                                                      input_dataset=entire_dataset, dataset_name=DataSet_name,
-                                                      weight_decay=1e-6, num_folds=5)
+hyp_opt_gnns = GNN_Models_HyperParameter_Optimization(gnn_model_index=3, meta_learning_epochs=100, act_fun="ReLu", input_dataset=entire_dataset,
+                                                      dataset_name=DataSet_name, weight_decay=1e-6, num_folds=5)
 
 hyp_opt_gnns(load_index=0)
