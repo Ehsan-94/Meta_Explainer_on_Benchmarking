@@ -15,8 +15,8 @@ import sys
 from torch_geometric.datasets import TUDataset
 from torch_geometric.nn import global_add_pool
 from scipy.sparse import csr_matrix
-py_path = '/data/cs.aau.dk/ey33jw/Meta_Explainer_on_Benchmarking/Models/Script/Layers/'
-sys.path.insert(0, py_path)
+from Meta_Explainer_on_Benchmarking.HyperParameter_Optimization_of_GNNs_on_Graph_Classification.Script.hyperparameter_optimization_of_gnns_on_graph_classification import parent_dir as parent_dir
+sys.path.insert(0, parent_dir)
 from Meta_Explainer_on_Benchmarking.Models.Script.Layers import GIN_MLP_Layers as gin_mlp_layers
 
 

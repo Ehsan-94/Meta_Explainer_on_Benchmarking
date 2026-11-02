@@ -13,8 +13,8 @@ from torch_geometric.nn import GCNConv
 import sys 
 from torch_geometric.datasets import TUDataset
 from scipy.sparse import csr_matrix
-py_path = '/data/cs.aau.dk/ey33jw/Meta_Explainer_on_Benchmarking/Models/Script/Layers/'
-sys.path.insert(0,py_path)
+from Meta_Explainer_on_Benchmarking.HyperParameter_Optimization_of_GNNs_on_Graph_Classification.Script.hyperparameter_optimization_of_gnns_on_graph_classification import parent_dir as parent_dir
+sys.path.insert(0, parent_dir)
 from Meta_Explainer_on_Benchmarking.Models.Script.Layers import GlobalAveragePooling as global_avg_pooling
 from Meta_Explainer_on_Benchmarking.Models.Script.Layers import IdenticalPooling as identical_pooling
 from Meta_Explainer_on_Benchmarking.Models.Script.Layers import DGCNN_Layer as dgcnn_layer

@@ -60,7 +60,7 @@ from Datasets_for_Explainability_Methods.Load_Dataset_Script import load_dataset
 class GNN_Models_HyperParameter_Optimization:
 
     def __init__(self, gnn_model_index, meta_learning_epochs, input_dataset, dataset_name, act_fun, weight_decay,
-                 num_folds):
+                 num_folds, parent_dir):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.GNN_Models_Name = dict([(1, "GCN_plus_GAP_Model"), (2, "DGCNN_Model"), (3, "DIFFPOOL_Model"), (4, "GIN_Model")])
         self.num_folds = num_folds
@@ -74,7 +74,7 @@ class GNN_Models_HyperParameter_Optimization:
         self.Model_Saving_Cycle = 100
         self.Explainability_name = "HyperParameter_Optimization_of_GNNs"
         self.Task_name = "Graph_Classification"
-        self.parent_dir = '/data/cs.aau.dk/ey33jw/'
+        self.parent_dir = parent_dir
         self.default_path = os.path.join(self.parent_dir, 'Meta_Explainer_on_Benchmarking/')
         os.chdir(self.default_path)
         self.csv_files_path = os.path.join(self.parent_dir, "Optimized_HyperParameters_for_GNN_Models/")
@@ -250,7 +250,7 @@ class GNN_Models_HyperParameter_Optimization:
             Models = {}
             k_dgcnn = {'MUTAG': 17, 'NCI1': 32, 'ENZYMES': 32, 'Graph-SST5': 19, 'PROTEINS': 26, 'IsCyclic': 20}
             node_feat_size = your_dataset[0].x.size()[-1]
-            dgcnn_input_dim = {'MUTAG': [32, 32, 32, 1], 'NCI1': [32, 32, 32, 1], 'ENZYMES': [32, 32, 32, 1], 'Graph-SST5': [32, 32, 32, 1],
+            dgcnn_input_dim = {'MUTAG': [32, 32, 32, 1], 'NCI1': [32, 32, 32, 1], 'ENZYMES': [32, 32, 32, 1], 'Graph-SST5': [64, 64, 64, 1],
                                'PROTEINS': [32, 32, 32, 1], 'IsCyclic': [32, 32, 32, 1]}
             GNN_layers = dgcnn_input_dim[self.dataset_name]
             feature_width = sum(GNN_layers)
@@ -749,8 +749,8 @@ finally:
 
 
 #.  GNN_Models_Name = dict([(1, "GCN_plus_GAP"), (2, "DGCNN"), (3, "DIFFPOOL"), (4, "GIN")])
-
+parent_dir = '/data/cs.aau.dk/ey33jw/'
 hyp_opt_gnns = GNN_Models_HyperParameter_Optimization(gnn_model_index=3, meta_learning_epochs=100, act_fun="ReLu", input_dataset=entire_dataset,
-                                                      dataset_name=DataSet_name, weight_decay=1e-6, num_folds=5)
+                                                      dataset_name=DataSet_name, weight_decay=1e-6, num_folds=5, parent_dir=parent_dir)
 
 hyp_opt_gnns(load_index=0)

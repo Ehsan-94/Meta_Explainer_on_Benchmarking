@@ -29,8 +29,8 @@ import torch_geometric.nn as gnn
 from sklearn import metrics
 from time import perf_counter
 import sys
-py_path = '/data/cs.aau.dk/ey33jw/Meta_Explainer_on_Benchmarking/Models/Script/Layers/'
-sys.path.insert(0, py_path)
+from Meta_Explainer_on_Benchmarking.HyperParameter_Optimization_of_GNNs_on_Graph_Classification.Script.hyperparameter_optimization_of_gnns_on_graph_classification import parent_dir as parent_dir
+sys.path.insert(0, parent_dir)
 
 from Meta_Explainer_on_Benchmarking.Models.Script.Layers import GCN_Layer as gcn_layer
 from Meta_Explainer_on_Benchmarking.Models.Script.Layers import GlobalAveragePooling as globalaveragepooling
