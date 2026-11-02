@@ -94,15 +94,17 @@ class GNN_Models_HyperParameter_Optimization:
         self.epoch_factor = 100
         DropOut_Rate = [0.25, 0.75]
         Bias = [0, 1]
-        Batch = [1, 4.999999] #. Batch_count_by_16
+        Batch = [1, 4.999999] #. batch_size_multiplier
         Loss_Function = [1, 3.999999]   #.   "CrossEntropyLoss" add more for now
         Weight_Initializer = [1, 3.999999] # 1. Xavier Uniform.  2. Kaiming.  3. uniform 0,0.1std
         self.weight_decay = weight_decay
+        batch_size_units = {"MUTAG": 16, "NCI1": 64, "Graph-SST5": 64, "ENZYMES": 16, "PROTEINS": 16, "IsCyclic": 16,}
+        self.batch_size_unit = batch_size_units[self.dataset_name]
 
         self.diffpool_link_weight = 1.0
         self.diffpool_entropy_weight = 1.0
         self.utility = UtilityFunction(kind="ucb", kappa=1.96, xi=0.01)
-        param_grid = dict(LR=LR, GNN_Epochs=GNN_Epochs, DropOut_Rate=DropOut_Rate, Bias=Bias, Batch_count_by_16=Batch,
+        param_grid = dict(LR=LR, GNN_Epochs=GNN_Epochs, DropOut_Rate=DropOut_Rate, Bias=Bias, batch_size_multiplier=Batch,
                           Loss_Function=Loss_Function, Weight_Initializer=Weight_Initializer)
         self.meta_optimizer = BayesianOptimization(f=None, pbounds=param_grid, verbose=3, random_state=4)
 
@@ -113,7 +115,7 @@ class GNN_Models_HyperParameter_Optimization:
     def decode_hyperparameters(self, params):
         return {"lr": float(params["LR"]), "gnn_epochs": int(params["GNN_Epochs"]) * self.epoch_factor,
                 "dropout_rate": float(params["DropOut_Rate"]), "bias": bool(round(params["Bias"])),
-                "batch_count_by_16": int(params["Batch_count_by_16"]), "loss_function": int(params["Loss_Function"]),
+                "batch_size_multiplier": int(params["batch_size_multiplier"]), "loss_function": int(params["Loss_Function"]),
                 "weight_init": int(params["Weight_Initializer"]), }
 
     def call_me_to_start(self, load_index):
@@ -127,7 +129,7 @@ class GNN_Models_HyperParameter_Optimization:
 
             target = self.Central_Room(act_fun=self.act_fun, load_index=load_index, weight_decay=self.weight_decay, lr=hyp_list["lr"],
                                        gnn_epochs=hyp_list["gnn_epochs"], dropout_rate=hyp_list["dropout_rate"], bias=hyp_list["bias"],
-                                       batch_count_by_16=hyp_list["batch_count_by_16"], loss_function=hyp_list["loss_function"],
+                                       batch_size_multiplier=hyp_list["batch_size_multiplier"], loss_function=hyp_list["loss_function"],
                                        weight_init=hyp_list["weight_init"])
             if not np.isfinite(target):
                 raise RuntimeError("Candidate produced a nonfinite score.")
@@ -140,9 +142,9 @@ class GNN_Models_HyperParameter_Optimization:
 
         self.Final_OutComes_by_fig()
 
-    def Central_Room(self, act_fun, load_index, weight_decay, lr, gnn_epochs, dropout_rate, bias, batch_count_by_16, loss_function, weight_init):
+    def Central_Room(self, act_fun, load_index, weight_decay, lr, gnn_epochs, dropout_rate, bias, batch_size_multiplier, loss_function, weight_init):
 
-        Train_Datasets, Test_Datasets = self.get_your_dataset(self.input_dataset, batch_count_by_16)
+        Train_Datasets, Test_Datasets = self.get_your_dataset(self.input_dataset, batch_size_multiplier)
         Models = self.Models_K_Folds(self.input_dataset, dropout_rate, bias, weight_init, act_fun=act_fun)
         Optimizers = self.Optimizers_K_Fold_and_LR(Models, lr, weight_decay)
 
@@ -154,7 +156,7 @@ class GNN_Models_HyperParameter_Optimization:
         ACC_Quantitative_list = []
         AUC_ROC_list = []
         AUC_PRC_list = []
-        checkpoint_config = {"lr": lr, "dropout": dropout_rate, "bias": bias, "batch_size": batch_count_by_16 * 16,
+        checkpoint_config = {"lr": lr, "dropout": dropout_rate, "bias": bias, "batch_size": batch_size_multiplier * self.batch_size_unit,
                              "loss": loss_function, "initializer": weight_init, "gnn_epochs": gnn_epochs,
                              "weight_decay": weight_decay, "activation": act_fun, "num_folds": self.num_folds, }
 
@@ -177,7 +179,7 @@ class GNN_Models_HyperParameter_Optimization:
         Model_Description = self.describe_trained_model(act_fun=act_fun)
         self.recording_csv_files(
             [self.dataset_name, self.GNN_Model_name, Model_Description, weight_init, self.num_folds, gnn_epochs, lr, dropout_rate, bias,
-             batch_count_by_16 * 16, loss_function, mean(AUC_ROC_list), mean(AUC_PRC_list), mean(ACC_Probabilistic_list),
+             batch_size_multiplier * self.batch_size_unit, loss_function, mean(AUC_ROC_list), mean(AUC_PRC_list), mean(ACC_Probabilistic_list),
              mean(GNN_Model_training_time_per_epoch_FOLDS)])
 
         return mean(AUC_ROC_list)
@@ -205,7 +207,7 @@ class GNN_Models_HyperParameter_Optimization:
         test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
         return train_dataloader, test_dataloader
 
-    def get_your_dataset(self, dataset, Batch_count_by_16):
+    def get_your_dataset(self, dataset, batch_size_multiplier):
         labels = np.array([int(graph.y.reshape(-1)[0].item()) for graph in dataset])
 
         _, class_counts = np.unique(labels, return_counts=True)
@@ -220,8 +222,9 @@ class GNN_Models_HyperParameter_Optimization:
         for fold_index, (train_indices, validation_indices) in enumerate(splitter.split(np.arange(len(dataset)), labels)):
             train_graphs, validation_graphs = self.pick_your_graph(dataset, train_indices.tolist(), validation_indices.tolist(), )
 
-            if Batch_count_by_16 != 0:
-                train_graphs, validation_graphs = self.batching_data(train_graphs, validation_graphs, BATCH_SIZE=Batch_count_by_16 * 16, )
+            if batch_size_multiplier != 0:
+                train_graphs, validation_graphs = self.batching_data(train_graphs, validation_graphs,
+                                                                     BATCH_SIZE=batch_size_multiplier * self.batch_size_unit, )
 
             Train_Datasets[fold_index] = train_graphs
             Test_Datasets[fold_index] = validation_graphs
@@ -663,10 +666,11 @@ class GNN_Models_HyperParameter_Optimization:
 
     def save_best_hyperparameters(self):
         best = self.meta_optimizer.max
+        hyperparameters = self.decode_hyperparameters(best["params"])
+        hyperparameters["batch_size"] = (hyperparameters["batch_size_multiplier"] * self.batch_size_unit)
 
         result = {"dataset": self.dataset_name, "gnn": self.GNN_Model_name, "mean_validation_macro_roc_auc": float(best["target"]),
-                  "hyperparameters": self.decode_hyperparameters(best["params"]), "weight_decay": self.weight_decay,
-                  "activation": self.act_fun, "num_folds": self.num_folds,}
+                  "hyperparameters": hyperparameters, "weight_decay": self.weight_decay, "activation": self.act_fun, "num_folds": self.num_folds, }
 
         save_dir = os.path.join(self.csv_files_path, self.Task_name, self.GNN_Model_name, )
         os.makedirs(save_dir, exist_ok=True)
@@ -732,7 +736,7 @@ class GNN_Models_HyperParameter_Optimization:
         plt.close()
 
 # RUN_DATASETS = ["MUTAG", "NCI1", "Graph-SST5", "ENZYMES", "PROTEINS", "IsCyclic", ]
-DataSet_name = "ENZYMES"
+DataSet_name = "NCI1"
 original_directory = os.getcwd()
 
 try:
